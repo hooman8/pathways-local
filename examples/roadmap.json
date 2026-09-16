@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "title": "Application onboarding",
+  "application": "Example service",
+  "tasks": [
+    {
+      "id": "review",
+      "title": "Architecture review",
+      "parentId": null,
+      "owner": "Platform team",
+      "description": "Review the application design and required services.",
+      "criteria": [
+        "Design reviewed"
+      ],
+      "dependsOn": [],
+      "status": "todo"
+    },
+    {
+      "id": "database-needed",
+      "title": "Is a database needed?",
+      "parentId": null,
+      "owner": "Platform team",
+      "description": "",
+      "criteria": [],
+      "dependsOn": [
+        "review"
+      ],
+      "status": "todo",
+      "decision": {
+        "answer": null
+      }
+    },
+    {
+      "id": "database",
+      "title": "Database setup",
+      "parentId": null,
+      "owner": "Platform team",
+      "description": "",
+      "criteria": [],
+      "dependsOn": [],
+      "status": "todo",
+      "condition": {
+        "decisionId": "database-needed",
+        "answer": "yes"
+      }
+    },
+    {
+      "id": "create-db",
+      "title": "Create database",
+      "parentId": "database",
+      "owner": "Platform team",
+      "description": "",
+      "criteria": [
+        "Database exists"
+      ],
+      "dependsOn": [],
+      "status": "todo"
+    },
+    {
+      "id": "configure-db",
+      "title": "Configure database access",
+      "parentId": "database",
+      "owner": "Platform team",
+      "description": "",
+      "criteria": [
+        "Application access verified"
+      ],
+      "dependsOn": [
+        "create-db"
+      ],
+      "status": "todo"
+    },
+    {
+      "id": "deploy",
+      "title": "Deploy application",
+      "parentId": null,
+      "owner": "Platform team",
+      "description": "",
+      "criteria": [
+        "Application is healthy"
+      ],
+      "dependsOn": [
+        "database-needed",
+        "database"
+      ],
+      "status": "todo"
+    }
+  ]
+}
