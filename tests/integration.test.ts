@@ -139,6 +139,43 @@ test("production app works with only a local SQLite database", { timeout: 120000
       assert.equal((await flowRequest("/validate", "POST", {}, { "Content-Type": "text/plain" })).status, 415);
       assert.equal((await flowRequest("/validate", "POST", { padding: "x".repeat(2_000_000) })).status, 413);
     });
+    await t.test("projects share roadmap identity and isolate flows without breaking bookmarks", async () => {
+      const projectRequest = (method = "GET", body?: unknown, extra: Record<string, string> = {}) => fetch(`${origin}/api/projects`, {
+        method, headers: { "Content-Type": "application/json", "X-Pathways-Client": "1", Origin: origin, ...extra },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const catalog = await (await projectRequest()).json();
+      assert.equal(catalog.projects.length, 2);
+      assert.equal(catalog.unassignedCount, 1);
+      assert.equal((await projectRequest("POST", { name: " ", revision: catalog.revision })).status, 400);
+      assert.equal((await projectRequest("POST", { name: "New", revision: catalog.revision }, { Origin: "https://attacker.example" })).status, 403);
+      assert.equal((await projectRequest("POST", { name: "New", revision: catalog.revision }, { "X-Pathways-Client": "" })).status, 403);
+      assert.equal((await projectRequest("POST", { padding: "x".repeat(4096) })).status, 413);
+      const result = await projectRequest("POST", { name: "Onboarding", revision: catalog.revision });
+      assert.equal(result.status, 201, await result.clone().text());
+      const { project, revision } = await result.json();
+      assert.equal((await projectRequest("POST", { name: "Other", revision: catalog.revision })).status, 409);
+      assert.equal((await projectRequest("POST", { name: " onboarding ", revision })).status, 409);
+      latest = await snapshot();
+      assert.equal(latest.revision, revision);
+      assert.deepEqual(latest.workspace!.projects.at(-1)!.roadmap.tasks, []);
+      assert.equal(latest.workspace!.projects.at(-1)!.id, project.id);
+      const beforeMove = savedFlow!;
+      const move = await flowRequest(`/${beforeMove.flow.id}`, "PUT", { flow: { ...beforeMove.flow, projectId: project.id }, revision: beforeMove.revision });
+      assert.equal(move.status, 200, await move.clone().text()); savedFlow = await move.json();
+      assert.deepEqual(savedFlow.flow.nodes, beforeMove.flow.nodes);
+      assert.deepEqual((await (await flowRequest("?projectId=")).json()).flows, []);
+      assert.deepEqual((await (await flowRequest(`?projectId=${catalog.projects[0].id}`)).json()).flows, []);
+      assert.equal((await (await flowRequest(`?projectId=${project.id}`)).json()).flows[0].id, savedFlow.flow.id);
+      assert.equal((await (await projectRequest()).json()).projects.find((p: { id: string }) => p.id === project.id).flowCount, 1);
+      assert.equal((await flowRequest(`/${savedFlow.flow.id}`, "PUT", { flow: { ...savedFlow.flow, projectId: "missing" }, revision: savedFlow.revision })).status, 400);
+      const legacy = JSON.parse(JSON.stringify(savedFlow.flow)); delete legacy.projectId;
+      const legacySave = await flowRequest(`/${savedFlow.flow.id}`, "PUT", { flow: legacy, revision: savedFlow.revision });
+      assert.equal(legacySave.status, 200); savedFlow = await legacySave.json();
+      assert.equal(savedFlow.flow.projectId, project.id, "older clients must preserve project assignment");
+      assert.deepEqual(await snapshot(), latest, "moving a flow must not edit roadmap content");
+      assert.equal((await fetch(`${origin}/flows?flow=${savedFlow.flow.id}`)).status, 200);
+    });
     await t.test("a complete server restart preserves projects, templates, and revision", async () => {
       await stop(); await start();
       assert.deepEqual(await snapshot(), latest);

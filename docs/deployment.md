@@ -47,9 +47,9 @@ the original cloud application. It does not synchronize the two copies.
 Application flows have their own **Export** and **Import flow** actions. Workspace
 JSON exports omit them; a full database backup includes all flows and roadmaps.
 
-The application-flow update migrates SQLite schema 1 to schema 2 when the database
-is first opened. It preserves existing roadmap content. Older images reject schema
-2, so keep a pre-update backup if you need to roll back the application version.
+The project-grouping update migrates SQLite schema 1 or 2 to schema 3 when the
+database is first opened. It preserves existing content; older flows appear in
+Unassigned until moved to a project. Older images reject schema 3, so keep a pre-update backup if you need to roll back the application version.
 
 For an exact database backup, stop writes and copy the entire data directory:
 

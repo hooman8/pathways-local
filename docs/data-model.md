@@ -139,3 +139,11 @@ filtering. For substantially larger teams/data, consider project-level revisions
 and paginated loading; increasing only schema limits is not enough. There is no
 persisted audit history, soft-delete, or undo facility. Use SQLite or JSON backups for
 recovery, and export a draft before resolving a conflict by loading shared data.
+
+
+Schema 3 adds nullable `projectId` to flow definitions, referencing the same
+workspace project IDs as roadmaps. Existing schema-2 definitions remain unchanged
+and read as Unassigned. Save operations reject nonexistent project IDs. Moves use
+the flow revision, preserve its global ID and graph, and do not edit the roadmap.
+Project creation advances the workspace revision; renaming a roadmap project
+also renames it in the application-flow selector.

@@ -79,7 +79,9 @@ and exports do not belong in this public repository.
 - Reusable templates and JSON project/workspace import/export.
 - Automatic saving, conflict detection between tabs, and durable local storage.
 - Application behavior diagrams with approvals, labeled branches, timers, bounded
-  retries, linked subflows, and a local API for agent-generated definitions.
+  retries, linked subflows, project grouping, and a local API for agent-generated definitions.
+  Projects hold both roadmaps and application flows; create or switch projects in
+  the flow sidebar and move existing flows between them.
 
 **Stack:** Next.js 16, React 19, TypeScript, React Flow, ELK.js, Tailwind CSS 4,
 shadcn/ui, Node.js 22, and SQLite through Node's built-in `node:sqlite` module.

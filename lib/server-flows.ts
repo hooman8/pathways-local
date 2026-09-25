@@ -1,6 +1,6 @@
 import { assertLocalRequest, assertSameOrigin } from "./local-access";
 import { inspectFlow, type ApplicationFlow } from "./application-flow";
-import { localRepository } from "./sqlite-repository";
+import { localRepository, UnknownFlowProjectError } from "./sqlite-repository";
 
 const headers = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
@@ -27,7 +27,10 @@ export async function flowsApi(request: Request, action: "list" | "get" | "creat
   try {
     try { assertLocalRequest(request); if (!["list", "get"].includes(action)) assertSameOrigin(request); }
     catch (error) { return json({ error: error instanceof Error ? error.message : "Open the local workspace." }, 403); }
-    if (action === "list") return json({ flows: localRepository().listFlows() });
+    if (action === "list") {
+      const projectId = new URL(request.url).searchParams.get("projectId");
+      return json({ flows: localRepository().listFlows(projectId === null ? undefined : projectId || null) });
+    }
     if (action === "get") {
       const snapshot = localRepository().readFlow(id!);
       return snapshot ? json(snapshot) : json({ error: "This flow does not exist." }, 404);
@@ -37,6 +40,9 @@ export async function flowsApi(request: Request, action: "list" | "get" | "creat
     if (!report.valid || !report.flow) return json({ valid: false, error: "Check the flow definition.", issues: report.issues, warnings: report.warnings }, 400);
     const flow: ApplicationFlow = report.flow;
     if (action === "validate") return json({ valid: true, issues: [], warnings: report.warnings, flow });
+    // Older clients did not send projectId. Preserve an existing assignment;
+    // moving to Unassigned requires an explicit null.
+    if (action === "update" && body.flow.projectId === undefined) flow.projectId = localRepository().readFlow(id!)?.flow.projectId ?? null;
     if (action === "create") {
       const snapshot = localRepository().createFlow(flow);
       return snapshot ? json(snapshot, 201) : json({ error: "A flow with this ID already exists. Read it before editing, or choose a new ID." }, 409);
@@ -48,6 +54,7 @@ export async function flowsApi(request: Request, action: "list" | "get" | "creat
     const current = localRepository().readFlow(id!);
     return current ? json({ error: "This flow changed since you opened it. Your draft has been kept.", snapshot: current }, 409) : json({ error: "This flow does not exist." }, 404);
   } catch (error) {
+    if (error instanceof UnknownFlowProjectError) return json({ error: error.message }, 400);
     if (error instanceof RequestError) return json({ error: error.message }, error.status);
     console.error("Application flow unavailable", error instanceof Error ? error.message : "Unknown error");
     return json({ error: "The flow database is unavailable. Your draft has been kept." }, 503);

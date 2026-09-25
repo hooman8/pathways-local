@@ -20,6 +20,27 @@ then apply your changes to the latest definition. Flow exports contain one raw
 definition; linked subflows must be exported separately. Roadmap workspace exports
 do not include application flows. A full SQLite backup includes both.
 
+## Projects
+
+Choose a **Project** in the sidebar to see only its application flows. **New
+project** creates a project with an empty roadmap; the same project also appears
+in Project roadmaps. You can rename it from the roadmap's project controls.
+**New flow** and **Import flow** use the selected project. **Move to project**
+reassigns a saved flow without changing its ID, graph, or detail-flow links.
+Project switching is disabled while a flow draft is open.
+
+Existing definitions without a project are retained under **Unassigned**. Project
+membership is stored as `projectId`, not inferred from a name prefix. Flow IDs
+remain globally unique, including across projects. Cross-project detail links
+remain valid and select the destination project's context when opened. Projects
+organize local content; they are not an access-control boundary.
+
+Bookmarks use `/flows?project=<id>` or `/flows?project=<id>&flow=<id>`.
+Existing `/flows?flow=<id>` links still work and resolve the flow's current project.
+An empty `project` selects Unassigned. Exports include `projectId`; the UI imports
+into the selected project so exports from another installation remain usable.
+API imports must use a project ID that exists locally or set `projectId: null`.
+
 ## Local authoring API
 
 An agent or script running on the Mac can use these endpoints while the app runs.
@@ -27,11 +48,22 @@ The same [localhost checks](api.md#request-checks) protect every flow route.
 
 | Method and route | Body | Response |
 | --- | --- | --- |
-| `GET /api/flows` | None | `{ flows: [{ id, name, description, revision, updatedAt, nodes, edges }] }` (counts for nodes/edges) |
+| `GET /api/flows` | None | `{ flows: [{ id, projectId, name, description, revision, updatedAt, nodes, edges }] }` (counts for nodes/edges) |
+| `GET /api/flows?projectId=<id>` | None | Flows in that project; an empty `projectId` selects Unassigned |
+| `GET /api/projects` | None | `{ projects: [{ id, name, flowCount }], revision, unassignedCount }`; revision is the workspace revision |
+| `POST /api/projects` | `{ name, revision }` | 201 `{ project, revision }`; 409 on stale revision or duplicate name |
 | `GET /api/flows/:id` | None | `{ flow, revision, updatedAt }`, or 404 |
 | `POST /api/flows/validate` | `{ flow }` | Normalized definition, `valid`, `issues`, `warnings`; never saves |
 | `POST /api/flows` | `{ flow }` | 201 with saved snapshot; 409 if ID exists |
 | `PUT /api/flows/:id` | `{ flow, revision }` | Saved snapshot; 409 plus current `snapshot` if stale |
+
+To group definitions through the API, read `/api/projects`, then use an existing
+project ID or POST a name with that response's workspace `revision`. Set a flow's
+`projectId` and PUT it with its own current flow revision. Moving flows does not
+change the workspace revision. Explicit `projectId: null` moves to Unassigned;
+older PUT clients that omit the field preserve the existing assignment. Unknown
+project IDs return 400 on create/save. `/validate` checks definition structure
+without resolving project membership or saving anything.
 
 Example: save this synthetic definition as `flow.json` and create a local flow:
 
@@ -79,7 +111,7 @@ a letter or digit. Node and edge IDs must each be unique within a definition.
 
 | Object | Required fields | Optional fields and defaults |
 | --- | --- | --- |
-| Flow | `version: 1`, `id`, `name`, `nodes`, `edges` | `description: ""`, `notes: []` |
+| Flow | `version: 1`, `id`, `name`, `nodes`, `edges` | `projectId: null`, `description: ""`, `notes: []` |
 | Node | `id`, `kind`, `title` | `actor: ""`, `description: ""`, `checks: []`, `phase: ""`, `timer`, `subflowId` |
 | Edge | `id`, `source`, `target` | `label: ""`, `kind: "next"`, `retry` |
 | Timer | `mode`, `expression` | Mode is `deadline`, `duration`, or `schedule`; expression is descriptive text |
@@ -108,8 +140,9 @@ linked flows and phases for readability.
 
 ## Storage compatibility
 
-SQLite schema 2 adds an `application_flows` table with independent revisions.
-Opening a schema-1 database upgrades it without changing roadmaps or templates.
+SQLite schema 3 stores project membership in each flow definition alongside its
+independent revision. Schema-1 and schema-2 databases upgrade without rewriting
+existing roadmaps, templates, or flow definitions; legacy flows read as Unassigned.
 Take a database backup before upgrading: older application versions reject schema
-2. A flow save never changes the roadmap workspace revision. Flow deletion and
+3. A flow save never changes the roadmap workspace revision. Flow deletion and
 automatic merging of conflicting flow edits are not provided.

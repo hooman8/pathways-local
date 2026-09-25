@@ -22,7 +22,9 @@ Forwarded host headers are not trusted. No cross-origin access is enabled.
 | `GET /api/workspace` | Initialize if necessary and return the complete local snapshot |
 | `GET /api/workspace?revision=N` | 304 when unchanged; otherwise the complete snapshot |
 | `PUT /api/workspace` | Validate and atomically save `{ revision, workspace }` |
-| `GET /api/flows` | List saved application flow summaries |
+| `GET /api/projects` | List shared roadmap/flow projects, flow counts, and workspace revision |
+| `POST /api/projects` | Create a project with an empty roadmap using `{ name, revision }` |
+| `GET /api/flows` | List flow summaries; optional `?projectId=<id>` filter (empty means Unassigned) |
 | `GET /api/flows/:id` | Read a flow snapshot |
 | `POST /api/flows/validate` | Validate `{ flow }` without saving |
 | `POST /api/flows` | Create `{ flow }`; existing ID returns 409 |

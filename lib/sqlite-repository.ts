@@ -5,6 +5,10 @@ import { validateWorkspace } from "./projects";
 import type { WorkspaceRepository, WorkspaceState } from "./workspace-store";
 import { validateFlow, type ApplicationFlow, type FlowSnapshot, type FlowSummary } from "./application-flow";
 
+export class UnknownFlowProjectError extends Error {
+  constructor() { super("Choose an existing project, or use null for an unassigned flow."); }
+}
+
 export class SqliteRepository implements WorkspaceRepository {
   private db: DatabaseSync;
 
@@ -14,7 +18,7 @@ export class SqliteRepository implements WorkspaceRepository {
     try {
       this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       const version = this.db.prepare("PRAGMA user_version").get()?.user_version;
-      if (version !== 0 && version !== 1 && version !== 2) throw new Error("This database was created by a newer Pathways Local version.");
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error("This database was created by a newer Pathways Local version.");
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS workspace (
           id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -29,7 +33,7 @@ export class SqliteRepository implements WorkspaceRepository {
           definition TEXT NOT NULL CHECK (json_valid(definition))
             CHECK (json_extract(definition, '$.id') = id)
         ) STRICT;
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
       `);
     } catch (error) { this.db.close(); throw error; }
   }
@@ -63,9 +67,10 @@ export class SqliteRepository implements WorkspaceRepository {
 
   close() { this.db.close(); }
 
-  listFlows(): FlowSummary[] {
-    return this.db.prepare("SELECT id, revision, updated_at, json_extract(definition, '$.name') AS name, json_extract(definition, '$.description') AS description, json_array_length(definition, '$.nodes') AS nodes, json_array_length(definition, '$.edges') AS edges FROM application_flows ORDER BY updated_at DESC, id").all().map(row => ({
-      id: String(row.id), name: String(row.name), description: String(row.description), revision: Number(row.revision), updatedAt: String(row.updated_at), nodes: Number(row.nodes), edges: Number(row.edges),
+  listFlows(projectId?: string | null): FlowSummary[] {
+    const where = projectId === undefined ? "" : " WHERE json_extract(definition, '$.projectId') IS ?";
+    return this.db.prepare(`SELECT id, revision, updated_at, json_extract(definition, '$.projectId') AS project_id, json_extract(definition, '$.name') AS name, json_extract(definition, '$.description') AS description, json_array_length(definition, '$.nodes') AS nodes, json_array_length(definition, '$.edges') AS edges FROM application_flows${where} ORDER BY updated_at DESC, id`).all(...(projectId === undefined ? [] : [projectId])).map(row => ({
+      id: String(row.id), projectId: row.project_id === null ? null : String(row.project_id), name: String(row.name), description: String(row.description), revision: Number(row.revision), updatedAt: String(row.updated_at), nodes: Number(row.nodes), edges: Number(row.edges),
     }));
   }
 
@@ -76,14 +81,24 @@ export class SqliteRepository implements WorkspaceRepository {
 
   createFlow(input: ApplicationFlow): FlowSnapshot | null {
     const flow = validateFlow(input), updatedAt = new Date().toISOString();
+    this.assertFlowProject(flow.projectId);
     const result = this.db.prepare("INSERT INTO application_flows (id, revision, updated_at, definition) VALUES (?, 1, ?, ?) ON CONFLICT(id) DO NOTHING").run(flow.id, updatedAt, JSON.stringify(flow));
     return Number(result.changes) ? { flow, revision: 1, updatedAt } : null;
   }
 
   updateFlow(input: ApplicationFlow, revision: number): FlowSnapshot | null {
     const flow = validateFlow(input), updatedAt = new Date().toISOString();
+    this.assertFlowProject(flow.projectId);
     const result = this.db.prepare("UPDATE application_flows SET revision = revision + 1, updated_at = ?, definition = ? WHERE id = ? AND revision = ?").run(updatedAt, JSON.stringify(flow), flow.id, revision);
     return Number(result.changes) ? { flow, revision: revision + 1, updatedAt } : null;
+  }
+
+  private assertFlowProject(projectId: string | null) {
+    if (projectId === null) return;
+    // Projects cannot be deleted through the workspace API. The same project
+    // identity owns a roadmap and any number of flows; no second project catalog.
+    const found = this.db.prepare("SELECT 1 FROM workspace, json_each(workspace.state, '$.workspace.projects') AS project WHERE json_extract(project.value, '$.id') = ?").get(projectId);
+    if (!found) throw new UnknownFlowProjectError();
   }
 }
 

@@ -19,6 +19,7 @@ export const flowEdgeSchema = z.object({
 }).strict();
 export const applicationFlowSchema = z.object({
   version: z.literal(1), id, name: z.string().trim().min(1).max(120),
+  projectId: z.string().min(1).max(100).nullable().default(null),
   description: z.string().max(6000).default(""),
   notes: z.array(z.string().trim().min(1).max(2000)).max(30).default([]),
   nodes: z.array(flowNodeSchema).min(2).max(250),
@@ -29,7 +30,8 @@ export type FlowNode = z.infer<typeof flowNodeSchema>;
 export type FlowEdge = z.infer<typeof flowEdgeSchema>;
 export type FlowIssue = { path: string; message: string };
 export type FlowSnapshot = { flow: ApplicationFlow; revision: number; updatedAt: string };
-export type FlowSummary = { id: string; name: string; description: string; revision: number; updatedAt: string; nodes: number; edges: number };
+export type FlowSummary = { id: string; projectId: string | null; name: string; description: string; revision: number; updatedAt: string; nodes: number; edges: number };
+export type FlowProject = { id: string; name: string; flowCount: number };
 
 export function inspectFlow(input: unknown): { valid: boolean; issues: FlowIssue[]; warnings: string[]; flow?: ApplicationFlow } {
   const parsed = applicationFlowSchema.safeParse(input);
