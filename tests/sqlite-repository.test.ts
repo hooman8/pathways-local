@@ -76,11 +76,12 @@ test("flow definitions survive restart and reject duplicate IDs and stale revisi
   let a = new SqliteRepository(filename);
   const b = new SqliteRepository(filename);
   try {
-    const flow = exampleFlow(), created = a.createFlow(flow)!;
+    const flow = { ...exampleFlow(), presentationNotes: "Talk through the approved start." }, created = a.createFlow(flow)!;
     assert.equal(created.revision, 1);
     assert.equal(b.createFlow({ ...flow, name: "Duplicate" }), null);
     assert.deepEqual(b.readFlow(flow.id), created);
-    const saved = a.updateFlow({ ...flow, name: "Updated" }, 1)!;
+    const saved = a.updateFlow({ ...exampleFlow(), name: "Updated" }, 1)!;
+    assert.equal(saved.flow.presentationNotes, flow.presentationNotes, "older clients preserve write-ups");
     assert.equal(saved.revision, 2);
     assert.equal(b.updateFlow({ ...flow, name: "Stale" }, 1), null);
     assert.equal(b.updateFlow({ ...flow, id: "missing" }, 1), null);

@@ -11,7 +11,7 @@ feature. The installations remain independent; imports do not synchronize them.
 
 The file includes the project roadmap, progress, decisions, assignments, associated
 engineers and teams, every application-flow definition, saved display order, and
-links between those flows. It excludes sign-in accounts, roles, sessions,
+links between those flows, and per-flow presenter write-ups. It excludes sign-in accounts, roles, sessions,
 workspace templates, other projects, and server revision history. Use the separate
 workspace/template export or an operational database backup when those are needed.
 The older roadmap-only exports still work but do not include application flows.

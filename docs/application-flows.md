@@ -20,6 +20,27 @@ then apply your changes to the latest definition. Flow exports contain one raw
 definition; use **Export complete project** to include all of its linked flows and their order. Roadmap workspace exports
 do not include application flows. A full SQLite backup includes both.
 
+## Presenter notes
+
+Choose **Presenter notes** beside the Diagram/Steps controls to open a scrollable
+write-up alongside the flow. Select **Add write-up** or **Edit write-up**, enter
+plain text with paragraphs and line breaks, then **Save write-up**. Text size can
+be changed without modifying the saved notes. The panel stays open when moving
+between flows and displays each flow's own write-up; selecting steps does not
+replace it. On narrow screens the notes appear below the diagram.
+
+Notes are shared with everyone who can view the flow. Editing uses the same
+permissions and revision checks as editing its definition. Unsaved text is kept
+after a save failure; **Download draft** keeps a copy before reloading a conflicting
+version. Closing an unsaved editor asks before discarding it.
+
+Write-ups are stored in the optional `presentationNotes` field (up to 50,000
+characters), separately from design assumptions. Single-flow and complete-project
+exports include them. Older files without notes still import. Upgrade both
+instances to a version supporting presenter notes before transferring notes;
+older strict importers reject the new field. Omitting the field during an update
+preserves existing notes; send an empty string to clear them.
+
 ## Projects
 
 Choose a **Project** in the sidebar to see only its application flows. **New
@@ -129,7 +150,7 @@ a letter or digit. Node and edge IDs must each be unique within a definition.
 
 | Object | Required fields | Optional fields and defaults |
 | --- | --- | --- |
-| Flow | `version: 1`, `id`, `name`, `nodes`, `edges` | `projectId: null`, `description: ""`, `notes: []` |
+| Flow | `version: 1`, `id`, `name`, `nodes`, `edges` | `projectId: null`, `description: ""`, `notes: []`, `presentationNotes` |
 | Node | `id`, `kind`, `title` | `actor: ""`, `description: ""`, `checks: []`, `phase: ""`, `timer`, `subflowId` |
 | Edge | `id`, `source`, `target` | `label: ""`, `kind: "next"`, `retry` |
 | Timer | `mode`, `expression` | Mode is `deadline`, `duration`, or `schedule`; expression is descriptive text |

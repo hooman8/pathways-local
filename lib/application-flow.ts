@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const flowKinds = ["start", "human", "process", "decision", "api", "database", "timer", "subflow", "end"] as const;
 export const edgeKinds = ["next", "branch", "error", "retry"] as const;
+export const MAX_PRESENTATION_NOTES_LENGTH = 50_000;
 const id = z.string().min(1).max(100).regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, "Use letters, numbers, underscores, or hyphens for IDs.");
 export const flowNodeSchema = z.object({
   id, kind: z.enum(flowKinds), title: z.string().trim().min(1).max(120),
@@ -22,6 +23,7 @@ export const applicationFlowSchema = z.object({
   projectId: z.string().min(1).max(100).nullable().default(null),
   description: z.string().max(6000).default(""),
   notes: z.array(z.string().trim().min(1).max(2000)).max(30).default([]),
+  presentationNotes: z.string().max(MAX_PRESENTATION_NOTES_LENGTH).optional(),
   nodes: z.array(flowNodeSchema).min(2).max(250),
   edges: z.array(flowEdgeSchema).min(1).max(600),
 }).strict();
