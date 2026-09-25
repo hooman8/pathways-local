@@ -110,6 +110,8 @@ export class SqliteRepository implements WorkspaceRepository {
   updateFlow(input: ApplicationFlow, revision: number): FlowSnapshot | null {
     const flow = validateFlow(input), updatedAt = new Date().toISOString();
     this.assertFlowProject(flow.projectId);
+    const previous = this.readFlow(flow.id);
+    if (flow.presentationNotes === undefined && previous?.flow.presentationNotes !== undefined) flow.presentationNotes = previous.flow.presentationNotes;
     const result = this.db.prepare(`UPDATE application_flows SET revision = revision + 1, updated_at = ?, definition = ?,
       position = CASE WHEN json_extract(definition, '$.projectId') IS ? THEN position ELSE
         (SELECT COALESCE(MAX(position), -1) + 1 FROM application_flows WHERE json_extract(definition, '$.projectId') IS ?) END

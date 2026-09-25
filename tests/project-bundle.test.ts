@@ -30,3 +30,16 @@ test("external detail links are disclosed and detached instead of binding to unr
   assert.equal(imported.flows[0].nodes.find(node => node.id === "work")!.kind, "subflow");
   assert.equal(imported.result.warnings.length, 1);
 });
+
+test("presenter write-ups survive complete-project transfers and older files remain valid", () => {
+  const { workspace, bundle } = transferFixture();
+  assert.equal(validateBundle(bundle).flows[0].presentationNotes, undefined);
+  const text = "Opening: explain the purpose.\n\nWalk through approval → scheduled work.\n<script>This stays plain text.</script>";
+  bundle.flows[0].presentationNotes = text;
+  const imported = prepareBundleImport(workspace, bundle);
+  assert.equal(imported.flows[0].presentationNotes, text);
+  const exported = exportBundle(imported.workspace, imported.result.project.id, imported.flows);
+  assert.equal(exported.flows[0].presentationNotes, text);
+  assert.deepEqual(exported.flows[0].nodes, imported.flows[0].nodes);
+  assert.throws(() => validateBundle({ ...bundle, flows: [{ ...bundle.flows[0], presentationNotes: "x".repeat(50001) }, ...bundle.flows.slice(1)] }));
+});

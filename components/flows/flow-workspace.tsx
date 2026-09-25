@@ -1,13 +1,14 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages -- Full navigation preserves native beforeunload protection for unsaved flow drafts. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, ChevronsUp, Braces, Check, Download, FolderOpen, GitBranch, Plus, RefreshCw, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, ChevronsUp, BookOpen, Braces, Check, Download, FolderOpen, GitBranch, Plus, RefreshCw, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { type ApplicationFlow, type FlowSnapshot, type FlowSummary, type FlowProject } from "@/lib/application-flow";
 import ProjectTransfer from "./project-transfer";
 import FlowCanvas from "./flow-canvas";
+import PresentationNotes from "./presentation-notes";
 
 const requestHeaders = { "Content-Type": "application/json", "X-Pathways-Client": "1" };
 function download(flow: ApplicationFlow) {
@@ -45,11 +46,12 @@ export default function FlowWorkspace({ initialId, initialProjectId, storage = "
   const [selected, setSelected] = useState<string | null>(null), [phase, setPhase] = useState(""), [view, setView] = useState<"diagram" | "steps">("diagram");
   const [editor, setEditor] = useState(false), [source, setSource] = useState(""), [creating, setCreating] = useState(false), [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<ApplicationFlow | null>(null), [editorError, setEditorError] = useState(""), [warnings, setWarnings] = useState<string[]>([]);
+  const [showPresentation, setShowPresentation] = useState(false), [notesEditing, setNotesEditing] = useState(false), [notesTextSize, setNotesTextSize] = useState("18");
   const upload = useRef<HTMLInputElement>(null), loadSequence = useRef(0);
   const flow = draft ?? snapshot?.flow;
   const currentProject = projects.find(project => project.id === projectId);
   const visibleFlows = flows.filter(item => (item.projectId ?? "") === projectId);
-  const locked = loading || busy || !!draft || editor;
+  const locked = loading || busy || !!draft || editor || notesEditing;
   const flowName = (item: FlowSummary) => currentProject && item.name.startsWith(`${currentProject.name} · `) ? item.name.slice(currentProject.name.length + 3) : item.name;
   const step = flow?.nodes.find(node => node.id === selected);
   const load = useCallback(async (id: string) => {
@@ -162,6 +164,12 @@ export default function FlowWorkspace({ initialId, initialProjectId, storage = "
     } catch (error) { setError(error instanceof Error ? error.message : "Could not save. Your draft is kept."); }
     finally { setBusy(false); }
   }
+  async function savePresentationNotes(notes: string) {
+    if (!snapshot) return;
+    const body = await readJson(`/api/flows/${encodeURIComponent(snapshot.flow.id)}`, { method: "PUT", headers: requestHeaders,
+      body: JSON.stringify({ flow: { ...snapshot.flow, presentationNotes: notes }, revision: snapshot.revision }) });
+    setSnapshot(body);
+  }
   async function importFile(file?: File) {
     if (!file) return;
     if (file.size > 2_000_000) { setError("Choose a flow JSON file smaller than 2 MB."); return; }
@@ -203,13 +211,16 @@ export default function FlowWorkspace({ initialId, initialProjectId, storage = "
       <header className="flow-topbar"><span>{currentProject?.name ?? "Unassigned"} / Application flows</span><span className="flow-mode-badge">DESIGN VIEW</span></header>
       {error && <div className="flow-error" role="alert">{error}</div>}
       {loading ? <div className="flow-empty" role="status">Loading flows…</div> : !flow ? <div className="flow-empty"><GitBranch size={34} /><h1>{currentProject ? `${currentProject.name} workflows` : "Map how your application works"}</h1><p>Create or import a flow in {currentProject?.name ?? "Unassigned"}.</p><Button disabled={!permissions.canEdit} onClick={() => openEditor(emptyFlow(projectId), true)}>Create your first flow</Button></div> : <>
-        <div className="flow-heading"><div><div className="flow-eyebrow">{currentProject?.name ?? "Unassigned"} · APPLICATION BEHAVIOR</div><h1>{flow.name}</h1><p>{flow.description}</p></div><div className="flow-actions"><Button variant="outline" disabled={locked || !permissions.canEdit} onClick={() => { setMoveTarget(projectId); setProjectError(""); setProjectDialog("move"); }}><FolderOpen size={15} />Move to project</Button><Button variant="outline" disabled={busy || !permissions.canEdit} onClick={() => openEditor(flow, !!draft && creating)}><Braces size={15} />Edit definition</Button><Button variant="outline" onClick={() => download(flow)}><Download size={15} />Export</Button></div></div>
+        <div className="flow-heading"><div><div className="flow-eyebrow">{currentProject?.name ?? "Unassigned"} · APPLICATION BEHAVIOR</div><h1>{flow.name}</h1><p>{flow.description}</p></div><div className="flow-actions"><Button variant="outline" disabled={locked || !permissions.canEdit} onClick={() => { setMoveTarget(projectId); setProjectError(""); setProjectDialog("move"); }}><FolderOpen size={15} />Move to project</Button><Button variant="outline" disabled={busy || notesEditing || !permissions.canEdit} onClick={() => openEditor(flow, !!draft && creating)}><Braces size={15} />Edit definition</Button><Button variant="outline" onClick={() => download(flow)}><Download size={15} />Export</Button></div></div>
         {draft && <div className="flow-draft" role="status"><span><strong>Draft preview</strong> · Review before saving.</span><div><Button variant="ghost" disabled={busy} onClick={() => { setDraft(null); setCreating(false); setError(""); setWarnings([]); }}>Discard draft</Button><Button disabled={busy} onClick={() => void save()}><Check size={15} />{busy ? "Saving…" : "Save flow"}</Button></div></div>}
         {!!warnings.length && <div className="flow-warning">{warnings.join(" ")}</div>}
-        <div className="flow-toolbar"><div className="flow-view-tabs"><button aria-pressed={view === "diagram"} onClick={() => setView("diagram")}>Diagram</button><button aria-pressed={view === "steps"} onClick={() => setView("steps")}>Steps</button></div><label>Phase <select value={phase} onChange={event => { setPhase(event.target.value); setSelected(null); }}><option value="">All phases</option>{[...new Set(flow.nodes.map(node => node.phase).filter(Boolean))].map(phase => <option key={phase}>{phase}</option>)}</select></label><span>{flow.nodes.length} steps · {flow.edges.length} connections{snapshot && !creating ? ` · Revision ${snapshot.revision}` : ""}</span></div>
+        <div className="flow-toolbar"><div className="flow-view-tabs"><button aria-pressed={view === "diagram"} onClick={() => setView("diagram")}>Diagram</button><button aria-pressed={view === "steps"} onClick={() => setView("steps")}>Steps</button></div><label>Phase <select value={phase} onChange={event => { setPhase(event.target.value); setSelected(null); }}><option value="">All phases</option>{[...new Set(flow.nodes.map(node => node.phase).filter(Boolean))].map(phase => <option key={phase}>{phase}</option>)}</select></label><Button variant="outline" aria-pressed={showPresentation} onClick={() => setShowPresentation(value => !value)}><BookOpen size={15} />Presenter notes</Button><span>{flow.nodes.length} steps · {flow.edges.length} connections{snapshot && !creating ? ` · Revision ${snapshot.revision}` : ""}</span></div>
+        <div className={showPresentation ? "flow-presentation-layout" : undefined}>
         <div className={`flow-content${step ? " with-details" : ""}`}>
           {view === "diagram" ? <FlowCanvas flow={flow} phase={phase} selected={selected} onSelect={setSelected} /> : <div className="flow-step-list">{flow.nodes.filter(node => !phase || node.phase === phase).map(node => <button key={node.id} className={selected === node.id ? "active" : ""} onClick={() => setSelected(node.id)}><span className={`flow-kind-label flow-kind-${node.kind}`}>{node.kind}</span><div><strong>{node.title}</strong><p>{node.actor}{node.phase ? ` · ${node.phase}` : ""}</p></div><ArrowUpRight size={16} /></button>)}</div>}
           {step && <aside className="flow-details"><div className="flow-detail-top"><span>{step.kind}</span><Button aria-label="Close step details" variant="ghost" size="icon" onClick={() => setSelected(null)}><X size={16} /></Button></div><h2>{step.title}</h2>{step.actor && <p className="flow-detail-actor">{step.actor}</p>}<p className="flow-detail-description">{step.description || "No additional details."}</p>{step.timer && <section><h3>Timer rule</h3><p>{step.timer.mode}: {step.timer.expression}</p><small>This describes the timer; the diagram does not schedule a live action.</small></section>}{!!step.checks.length && <section><h3>Checks & outcomes</h3><ul>{step.checks.map((check, i) => <li key={i}>{check}</li>)}</ul></section>}{step.subflowId && <Button variant="outline" disabled={!!draft} onClick={() => void load(step.subflowId!)}>Open detail flow <ArrowUpRight size={15} /></Button>}<section><h3>Next steps</h3>{flow.edges.filter(edge => edge.source === step.id).map(edge => <div key={edge.id} className="flow-next-step"><button onClick={() => { setPhase(""); setSelected(edge.target); }}><span>{edge.label || "Next"}</span>{flow.nodes.find(node => node.id === edge.target)?.title}</button>{edge.retry && <small>Up to {edge.retry.maxAttempts} attempts · {edge.retry.backoff}</small>}</div>)}</section></aside>}
+        </div>
+        {showPresentation && <PresentationNotes key={flow.id} name={flow.name} notes={flow.presentationNotes ?? ""} canEdit={permissions.canEdit} disabled={locked} onClose={() => setShowPresentation(false)} onEditing={setNotesEditing} onSave={savePresentationNotes} size={notesTextSize} onSize={setNotesTextSize} />}
         </div>
         {!!flow.notes.length && <details className="flow-notes"><summary>Design notes & assumptions ({flow.notes.length})</summary><ul>{flow.notes.map((note, i) => <li key={i}>{note}</li>)}</ul></details>}
         <footer className="flow-footer">A model of the process. Steps and timers here do not call external systems.</footer>
