@@ -37,13 +37,19 @@ is intended for one person on one computer. It does not provide remote-user logi
 ## Data and backups
 
 The named volume is `pathways-local_pathways-data`. SQLite stores the complete
-workspace, templates, local owner metadata, and revision in `/data/pathways.sqlite`.
+workspace, templates, local owner metadata, revisions, and application flows in `/data/pathways.sqlite`.
 WAL and shared-memory sidecar files may also exist.
 
 For a portable content backup, use **Export → Export workspace & templates** in the
 application. Import that JSON into another installation to add the saved projects,
 templates, teams, engineers, and progress. This is also the migration route from
 the original cloud application. It does not synchronize the two copies.
+Application flows have their own **Export** and **Import flow** actions. Workspace
+JSON exports omit them; a full database backup includes all flows and roadmaps.
+
+The application-flow update migrates SQLite schema 1 to schema 2 when the database
+is first opened. It preserves existing roadmap content. Older images reject schema
+2, so keep a pre-update backup if you need to roll back the application version.
 
 For an exact database backup, stop writes and copy the entire data directory:
 

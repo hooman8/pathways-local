@@ -106,7 +106,11 @@ A single `workspace` row contains `id = 1`, `revision`, and a JSON `state` with
 workspace content, local membership, timestamps, and revision. A SQL constraint
 keeps the JSON revision consistent with the indexed revision. The whole row is
 updated atomically using a revision predicate. Reads see one complete snapshot.
-Schema version 1 is recorded with `PRAGMA user_version`.
+Schema version 2 is recorded with `PRAGMA user_version`. A separate
+`application_flows` table stores each definition's `id`, `revision`, `updated_at`,
+and JSON `definition`. Each flow has an independent revision. The schema-1 upgrade
+adds that table without modifying the workspace row. See
+[Application flows](application-flows.md) for the flow schema and invariants.
 
 The database uses WAL journaling and FULL synchronous writes. Its file and any
 sidecars live together in the persistent Docker volume. The active project is a

@@ -46,6 +46,9 @@ uses the local owner, and no account-management UI or endpoint is exposed.
 | Diagram rendering | `components/roadmap/roadmap-canvas.tsx` |
 | Automatic geometry and connector routing | `lib/roadmap-layout.ts`, `lib/connector-routing.ts` |
 | Defaults and styling | `lib/sample-roadmap.ts`, `app/globals.css`, `components/ui/` |
+| Application flow schema and graph validation | `lib/application-flow.ts` |
+| Flow API and independent revisions | `lib/server-flows.ts`, `app/api/flows/` |
+| Application flow viewer and geometry | `components/flows/`, `lib/flow-layout.ts`, `app/flows/` |
 | Container and volume | `Dockerfile`, `compose.yaml` |
 
 ## A save from browser to disk
@@ -70,6 +73,12 @@ selection is a browser preference; unsaved edits live in memory. The server must
 be running to load and save, even when the Mac has no internet connection.
 
 ## Diagram semantics
+
+[Application flows](application-flows.md) model behavior independently of roadmap
+progress. They support descriptive timers, labeled outcomes, bounded retries, and
+navigation to detail flows. They never execute integrations or scheduled actions.
+Their API uses the same local request checks and SQLite database, with a separate
+table and revision per flow. JSON edits are validated and previewed before saving.
 
 Prerequisites and decision conditions determine which work can start. Sibling
 order changes presentation, not prerequisites. ELK computes compound geometry;

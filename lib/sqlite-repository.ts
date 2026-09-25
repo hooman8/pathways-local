@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { validateWorkspace } from "./projects";
 import type { WorkspaceRepository, WorkspaceState } from "./workspace-store";
+import { validateFlow, type ApplicationFlow, type FlowSnapshot, type FlowSummary } from "./application-flow";
 
 export class SqliteRepository implements WorkspaceRepository {
   private db: DatabaseSync;
@@ -13,7 +14,7 @@ export class SqliteRepository implements WorkspaceRepository {
     try {
       this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       const version = this.db.prepare("PRAGMA user_version").get()?.user_version;
-      if (version !== 0 && version !== 1) throw new Error("This database was created by a newer Pathways Local version.");
+      if (version !== 0 && version !== 1 && version !== 2) throw new Error("This database was created by a newer Pathways Local version.");
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS workspace (
           id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -21,7 +22,14 @@ export class SqliteRepository implements WorkspaceRepository {
           state TEXT NOT NULL CHECK (json_valid(state))
             CHECK (json_extract(state, '$.revision') = revision)
         ) STRICT;
-        PRAGMA user_version = 1;
+        CREATE TABLE IF NOT EXISTS application_flows (
+          id TEXT PRIMARY KEY,
+          revision INTEGER NOT NULL CHECK (revision >= 1),
+          updated_at TEXT NOT NULL,
+          definition TEXT NOT NULL CHECK (json_valid(definition))
+            CHECK (json_extract(definition, '$.id') = id)
+        ) STRICT;
+        PRAGMA user_version = 2;
       `);
     } catch (error) { this.db.close(); throw error; }
   }
@@ -54,6 +62,29 @@ export class SqliteRepository implements WorkspaceRepository {
   }
 
   close() { this.db.close(); }
+
+  listFlows(): FlowSummary[] {
+    return this.db.prepare("SELECT id, revision, updated_at, json_extract(definition, '$.name') AS name, json_extract(definition, '$.description') AS description, json_array_length(definition, '$.nodes') AS nodes, json_array_length(definition, '$.edges') AS edges FROM application_flows ORDER BY updated_at DESC, id").all().map(row => ({
+      id: String(row.id), name: String(row.name), description: String(row.description), revision: Number(row.revision), updatedAt: String(row.updated_at), nodes: Number(row.nodes), edges: Number(row.edges),
+    }));
+  }
+
+  readFlow(id: string): FlowSnapshot | null {
+    const row = this.db.prepare("SELECT revision, updated_at, definition FROM application_flows WHERE id = ?").get(id);
+    return row ? { flow: validateFlow(JSON.parse(String(row.definition))), revision: Number(row.revision), updatedAt: String(row.updated_at) } : null;
+  }
+
+  createFlow(input: ApplicationFlow): FlowSnapshot | null {
+    const flow = validateFlow(input), updatedAt = new Date().toISOString();
+    const result = this.db.prepare("INSERT INTO application_flows (id, revision, updated_at, definition) VALUES (?, 1, ?, ?) ON CONFLICT(id) DO NOTHING").run(flow.id, updatedAt, JSON.stringify(flow));
+    return Number(result.changes) ? { flow, revision: 1, updatedAt } : null;
+  }
+
+  updateFlow(input: ApplicationFlow, revision: number): FlowSnapshot | null {
+    const flow = validateFlow(input), updatedAt = new Date().toISOString();
+    const result = this.db.prepare("UPDATE application_flows SET revision = revision + 1, updated_at = ?, definition = ? WHERE id = ? AND revision = ?").run(updatedAt, JSON.stringify(flow), flow.id, revision);
+    return Number(result.changes) ? { flow, revision: revision + 1, updatedAt } : null;
+  }
 }
 
 const runtime = globalThis as typeof globalThis & { pathwaysSqlite?: { filename: string; repository: SqliteRepository } };

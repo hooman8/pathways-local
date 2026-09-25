@@ -9,6 +9,8 @@ import { createServer } from "node:net";
 import { request as httpRequest } from "node:http";
 import { saveProjectTemplate, mergeProjectImport, parseProjectImport } from "../lib/projects";
 import type { SharedSnapshot } from "../lib/shared";
+import { exampleFlow } from "./flow-fixture";
+import type { FlowSnapshot } from "../lib/application-flow";
 
 // An OS-assigned port and a fresh temporary database isolate every run from the
 // user's local workspace. These tests never import cloud SDKs or credentials.
@@ -101,9 +103,46 @@ test("production app works with only a local SQLite database", { timeout: 120000
       assert.equal((await request("PUT", { revision: latest.revision, workspace: invalid })).status, 400);
       assert.deepEqual(await snapshot(), latest);
     });
+    let savedFlow: FlowSnapshot;
+    const flowRequest = (path = "", method = "GET", body?: unknown, headers: Record<string, string> = {}) => fetch(`${origin}/api/flows${path}`, {
+      method, headers: { "Content-Type": "application/json", Origin: origin, "X-Pathways-Client": "1", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10000),
+    });
+    await t.test("application flow API validates, creates, lists, and atomically edits definitions", async () => {
+      const flow = exampleFlow();
+      assert.equal((await fetch(`${origin}/flows`)).status, 200);
+      assert.equal((await flowRequest("/validate", "POST", { flow })).status, 200);
+      assert.deepEqual((await (await flowRequest()).json()).flows, [], "validation must not save");
+      const created = await flowRequest("", "POST", { flow });
+      assert.equal(created.status, 201, await created.clone().text());
+      savedFlow = await created.json();
+      assert.equal((await flowRequest("", "POST", { flow })).status, 409);
+      const list = await (await flowRequest()).json();
+      assert.equal(list.flows[0].id, flow.id);
+      assert.equal(list.flows[0].nodes, flow.nodes.length);
+      assert.deepEqual(await (await flowRequest(`/${flow.id}`)).json(), savedFlow);
+      const edits = await Promise.all(["First editor", "Second editor"].map(name => flowRequest(`/${flow.id}`, "PUT", { flow: { ...flow, name }, revision: 1 })));
+      assert.deepEqual(edits.map(result => result.status).sort(), [200, 409]);
+      savedFlow = await edits.find(result => result.status === 200)!.json();
+      assert.deepEqual((await edits.find(result => result.status === 409)!.json()).snapshot, savedFlow);
+      assert.equal((await flowRequest(`/${flow.id}`, "PUT", { flow, revision: 0 })).status, 400);
+      assert.equal((await flowRequest("/wrong", "PUT", { flow, revision: 2 })).status, 400);
+      assert.equal((await flowRequest("/absent")).status, 404);
+      assert.equal((await flowRequest("", "POST", { flow: { ...flow, id: "invalid", edges: [] } })).status, 400);
+      assert.deepEqual(await (await flowRequest(`/${flow.id}`)).json(), savedFlow);
+      assert.deepEqual(await snapshot(), latest, "flow edits must not change roadmaps");
+    });
+    await t.test("flow API rejects foreign origins, missing write headers, and oversized JSON", async () => {
+      assert.equal((await flowRequest("", "GET", undefined, { Origin: "https://attacker.example" })).status, 403);
+      assert.equal((await flowRequest("", "POST", {}, { "X-Pathways-Client": "" })).status, 403);
+      assert.equal((await flowRequest("/validate", "POST", {}, { Origin: "" })).status, 403);
+      assert.equal((await flowRequest("/validate", "POST", {}, { "Content-Type": "text/plain" })).status, 415);
+      assert.equal((await flowRequest("/validate", "POST", { padding: "x".repeat(2_000_000) })).status, 413);
+    });
     await t.test("a complete server restart preserves projects, templates, and revision", async () => {
       await stop(); await start();
       assert.deepEqual(await snapshot(), latest);
+      assert.deepEqual(await (await flowRequest(`/${savedFlow.flow.id}`)).json(), savedFlow);
     });
   } catch (error) { console.error(logs); throw error; }
   finally { await stop(); await rm(directory, { recursive: true, force: true }); }

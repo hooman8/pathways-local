@@ -382,3 +382,5 @@ button { cursor: pointer; } button:disabled { cursor: not-allowed; }
 .branch-conditions > button > span { flex: 1; overflow-wrap: anywhere; }
 .branch-conditions strong { display: block; color: #65508c; margin-top: 4px; }
 @media (max-width: 900px) { .map-actions { flex-wrap: wrap; justify-content: flex-end; } }
+
+.application-flows-link { display: flex; align-items: center; gap: 8px; margin: 0 20px 15px; color: #536d84; font-size: 12px; }

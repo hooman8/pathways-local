@@ -8,6 +8,7 @@ import { SqliteRepository } from "../lib/sqlite-repository";
 import { WorkspaceStore, WorkspaceError } from "../lib/workspace-store";
 import { localOwner } from "../lib/local-access";
 import { saveProjectTemplate } from "../lib/projects";
+import { exampleFlow } from "./flow-fixture";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "pathways-sqlite-"));
@@ -60,11 +61,50 @@ test("opening a newer SQLite schema refuses to downgrade it", () => {
   const { directory } = fixture();
   const filename = join(directory, "newer.sqlite");
   const database = new DatabaseSync(filename);
-  database.exec("PRAGMA user_version = 2;"); database.close();
+  database.exec("PRAGMA user_version = 3;"); database.close();
   try {
     assert.throws(() => new SqliteRepository(filename), /newer Pathways/);
     const check = new DatabaseSync(filename);
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 3);
     check.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("flow definitions survive restart and reject duplicate IDs and stale revisions", () => {
+  const { directory, filename } = fixture();
+  let a = new SqliteRepository(filename);
+  const b = new SqliteRepository(filename);
+  try {
+    const flow = exampleFlow(), created = a.createFlow(flow)!;
+    assert.equal(created.revision, 1);
+    assert.equal(b.createFlow({ ...flow, name: "Duplicate" }), null);
+    assert.deepEqual(b.readFlow(flow.id), created);
+    const saved = a.updateFlow({ ...flow, name: "Updated" }, 1)!;
+    assert.equal(saved.revision, 2);
+    assert.equal(b.updateFlow({ ...flow, name: "Stale" }, 1), null);
+    assert.equal(b.updateFlow({ ...flow, id: "missing" }, 1), null);
+    assert.throws(() => a.createFlow({ ...flow, nodes: [] }));
+    a.close(); a = new SqliteRepository(filename);
+    assert.deepEqual(a.readFlow(flow.id), saved);
+    assert.equal(a.listFlows().length, 1);
+    assert.equal(a.listFlows()[0].name, "Updated");
+    assert.equal(a.listFlows()[0].nodes, flow.nodes.length);
+  } finally { a.close(); b.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("schema 1 migration adds flow storage without changing the existing workspace", async () => {
+  const { directory, filename } = fixture();
+  let repository = new SqliteRepository(filename);
+  try {
+    const expected = await new WorkspaceStore(repository, localOwner.email).get(localOwner);
+    repository.close();
+    const old = new DatabaseSync(filename);
+    old.exec("DROP TABLE application_flows; PRAGMA user_version = 1;"); old.close();
+    repository = new SqliteRepository(filename);
+    assert.deepEqual(await new WorkspaceStore(repository, localOwner.email).get(localOwner), expected);
+    assert.equal(repository.listFlows().length, 0);
+    assert.equal(repository.createFlow(exampleFlow())?.revision, 1);
+    const check = new DatabaseSync(filename);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2); check.close();
+  } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
