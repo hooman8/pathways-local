@@ -106,7 +106,11 @@ A single `workspace` row contains `id = 1`, `revision`, and a JSON `state` with
 workspace content, local membership, timestamps, and revision. A SQL constraint
 keeps the JSON revision consistent with the indexed revision. The whole row is
 updated atomically using a revision predicate. Reads see one complete snapshot.
-Schema version 1 is recorded with `PRAGMA user_version`.
+Schema version 2 is recorded with `PRAGMA user_version`. A separate
+`application_flows` table stores each definition's `id`, `revision`, `updated_at`,
+and JSON `definition`. Each flow has an independent revision. The schema-1 upgrade
+adds that table without modifying the workspace row. See
+[Application flows](application-flows.md) for the flow schema and invariants.
 
 The database uses WAL journaling and FULL synchronous writes. Its file and any
 sidecars live together in the persistent Docker volume. The active project is a
@@ -135,3 +139,17 @@ filtering. For substantially larger teams/data, consider project-level revisions
 and paginated loading; increasing only schema limits is not enough. There is no
 persisted audit history, soft-delete, or undo facility. Use SQLite or JSON backups for
 recovery, and export a draft before resolving a conflict by loading shared data.
+
+
+Schema 3 adds nullable `projectId` to flow definitions, referencing the same
+workspace project IDs as roadmaps. Existing schema-2 definitions remain unchanged
+and read as Unassigned. Save operations reject nonexistent project IDs. Moves use
+the flow revision, preserve its global ID and graph, and do not edit the roadmap.
+Project creation advances the workspace revision; renaming a roadmap project
+also renames it in the application-flow selector.
+
+Schema 4 adds a `position` column to `application_flows`. Display order is scoped
+to each project (or Unassigned). Reordering is transactional and compares the
+previous complete ID order before updating positions; it leaves definitions,
+revision numbers, and modification timestamps untouched. New and moved flows
+append to the destination list.

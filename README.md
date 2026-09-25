@@ -78,6 +78,10 @@ and exports do not belong in this public repository.
 - Shared team/engineer directory for task assignments.
 - Reusable templates and JSON project/workspace import/export.
 - Automatic saving, conflict detection between tabs, and durable local storage.
+- Application behavior diagrams with approvals, labeled branches, timers, bounded
+  retries, linked subflows, project grouping, and a local API for agent-generated definitions.
+  Projects hold both roadmaps and application flows; create or switch projects in
+  the flow sidebar and move existing flows between them.
 
 **Stack:** Next.js 16, React 19, TypeScript, React Flow, ELK.js, Tailwind CSS 4,
 shadcn/ui, Node.js 22, and SQLite through Node's built-in `node:sqlite` module.
@@ -106,6 +110,7 @@ including a server restart. No cloud credentials, emulators, or Java are needed.
 | Storage, API, and code map | [Architecture](docs/architecture.md) |
 | Task rules and compatibility | [Data model](docs/data-model.md) |
 | API and localhost request checks | [API reference](docs/api.md) |
+| Application diagrams and agent authoring API | [Application flows](docs/application-flows.md) |
 | Docker, updates, and backups | [Operations](docs/deployment.md) |
 | Using the roadmap | [User guide](docs/user-guide.md) |
 | Contributions and security | [Contributing](CONTRIBUTING.md), [Security](SECURITY.md) |

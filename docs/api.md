@@ -8,7 +8,7 @@ are required. Local clients with access to the service can read and edit everyth
 
 ## Request checks
 
-Workspace requests must carry the actual Host matching `APP_BASE_URL`. Foreign
+Workspace and application-flow requests must carry the actual Host matching `APP_BASE_URL`. Foreign
 Origins and `Sec-Fetch-Site: cross-site` are rejected, including on reads. Writes
 require the exact Origin, `Content-Type: application/json`, and
 `X-Pathways-Client: 1`. Use `X-Pathways-Decisions: 1` when saving decision workflows.
@@ -22,6 +22,17 @@ Forwarded host headers are not trusted. No cross-origin access is enabled.
 | `GET /api/workspace` | Initialize if necessary and return the complete local snapshot |
 | `GET /api/workspace?revision=N` | 304 when unchanged; otherwise the complete snapshot |
 | `PUT /api/workspace` | Validate and atomically save `{ revision, workspace }` |
+| `GET /api/projects` | List shared roadmap/flow projects, flow counts, and workspace revision |
+| `POST /api/projects` | Create a project with an empty roadmap using `{ name, revision }` |
+| `GET /api/flows` | List flow summaries; optional `?projectId=<id>` filter (empty means Unassigned) |
+| `GET /api/flows/:id` | Read a flow snapshot |
+| `POST /api/flows/validate` | Validate `{ flow }` without saving |
+| `POST /api/flows` | Create `{ flow }`; existing ID returns 409 |
+| `PUT /api/flow-order` | Save a project’s complete flow order using `{ projectId, expectedOrder, flowIds }` |
+| `PUT /api/flows/:id` | Validate and atomically save `{ flow, revision }` |
+
+See [Application flows](application-flows.md) for their schema, examples, and
+revision rules. These APIs store diagram definitions; they do not execute them.
 
 The snapshot retains `workspace`, `revision`, `updatedAt`, `updatedBy`, `user`,
 `membership`, and `members` for compatibility with the inherited domain layer.
