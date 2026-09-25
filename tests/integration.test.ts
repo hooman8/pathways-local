@@ -176,10 +176,36 @@ test("production app works with only a local SQLite database", { timeout: 120000
       assert.deepEqual(await snapshot(), latest, "moving a flow must not edit roadmap content");
       assert.equal((await fetch(`${origin}/flows?flow=${savedFlow.flow.id}`)).status, 200);
     });
+    let expectedFlowOrder: string[];
+    await t.test("flow order API persists an exact project permutation and rejects stale or unsafe writes", async () => {
+      const projectId = savedFlow!.flow.projectId;
+      const reorder = (body: unknown, extra: Record<string, string> = {}) => fetch(`${origin}/api/flow-order`, {
+        method: "PUT", headers: { "Content-Type": "application/json", "X-Pathways-Client": "1", Origin: origin, ...extra }, body: JSON.stringify(body),
+      });
+      for (const id of ["detail-two", "detail-three"]) assert.equal((await flowRequest("", "POST", { flow: { ...exampleFlow(), id, projectId } })).status, 201);
+      assert.equal((await flowRequest("", "POST", { flow: { ...exampleFlow(), id: "outside" } })).status, 201);
+      const list = (await (await flowRequest(`?projectId=${projectId}`)).json()).flows;
+      const expectedOrder = list.map((flow: { id: string }) => flow.id);
+      expectedFlowOrder = [...expectedOrder].reverse();
+      const body = { projectId, expectedOrder, flowIds: expectedFlowOrder };
+      assert.equal((await reorder(body, { Origin: "https://attacker.example" })).status, 403);
+      assert.equal((await reorder(body, { "X-Pathways-Client": "" })).status, 403);
+      assert.equal((await reorder({ ...body, projectId: undefined })).status, 400);
+      assert.equal((await reorder({ ...body, projectId: "missing" })).status, 400);
+      assert.equal((await reorder({ ...body, flowIds: [expectedOrder[0], expectedOrder[0], "outside"] })).status, 400);
+      const results = await Promise.all([reorder(body), reorder(body)]);
+      assert.deepEqual(results.map(response => response.status).sort(), [200, 409]);
+      const saved = await results.find(response => response.status === 200)!.json();
+      assert.deepEqual(saved.flows.map((flow: { id: string }) => flow.id), expectedFlowOrder);
+      assert.deepEqual(await (await flowRequest(`/${savedFlow!.flow.id}`)).json(), savedFlow!);
+      assert.deepEqual(await snapshot(), latest);
+      assert.deepEqual((await (await flowRequest("?projectId=")).json()).flows.map((flow: { id: string }) => flow.id), ["outside"]);
+    });
     await t.test("a complete server restart preserves projects, templates, and revision", async () => {
       await stop(); await start();
       assert.deepEqual(await snapshot(), latest);
       assert.deepEqual(await (await flowRequest(`/${savedFlow.flow.id}`)).json(), savedFlow);
+      assert.deepEqual((await (await flowRequest(`?projectId=${savedFlow.flow.projectId}`)).json()).flows.map((flow: { id: string }) => flow.id), expectedFlowOrder);
     });
   } catch (error) { console.error(logs); throw error; }
   finally { await stop(); await rm(directory, { recursive: true, force: true }); }

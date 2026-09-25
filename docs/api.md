@@ -28,6 +28,7 @@ Forwarded host headers are not trusted. No cross-origin access is enabled.
 | `GET /api/flows/:id` | Read a flow snapshot |
 | `POST /api/flows/validate` | Validate `{ flow }` without saving |
 | `POST /api/flows` | Create `{ flow }`; existing ID returns 409 |
+| `PUT /api/flow-order` | Save a project’s complete flow order using `{ projectId, expectedOrder, flowIds }` |
 | `PUT /api/flows/:id` | Validate and atomically save `{ flow, revision }` |
 
 See [Application flows](application-flows.md) for their schema, examples, and

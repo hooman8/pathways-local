@@ -147,3 +147,9 @@ and read as Unassigned. Save operations reject nonexistent project IDs. Moves us
 the flow revision, preserve its global ID and graph, and do not edit the roadmap.
 Project creation advances the workspace revision; renaming a roadmap project
 also renames it in the application-flow selector.
+
+Schema 4 adds a `position` column to `application_flows`. Display order is scoped
+to each project (or Unassigned). Reordering is transactional and compares the
+previous complete ID order before updating positions; it leaves definitions,
+revision numbers, and modification timestamps untouched. New and moved flows
+append to the destination list.

@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-html-link-for-pages -- Full navigation preserves native beforeunload protection for unsaved flow drafts. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowUpRight, Braces, Check, Download, FolderOpen, GitBranch, Plus, RefreshCw, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, ChevronsUp, Braces, Check, Download, FolderOpen, GitBranch, Plus, RefreshCw, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -38,6 +38,7 @@ export default function FlowWorkspace({ initialId, initialProjectId }: { initial
   const [projects, setProjects] = useState<FlowProject[]>([]), [projectId, setProjectId] = useState("");
   const [projectRevision, setProjectRevision] = useState(0), [projectDialog, setProjectDialog] = useState<"create" | "move" | null>(null);
   const [projectName, setProjectName] = useState(""), [moveTarget, setMoveTarget] = useState(""), [projectError, setProjectError] = useState("");
+  const [arranging, setArranging] = useState(false), [orderStatus, setOrderStatus] = useState("");
   const [loading, setLoading] = useState(true), [error, setError] = useState("");
   const [selected, setSelected] = useState<string | null>(null), [phase, setPhase] = useState(""), [view, setView] = useState<"diagram" | "steps">("diagram");
   const [editor, setEditor] = useState(false), [source, setSource] = useState(""), [creating, setCreating] = useState(false), [busy, setBusy] = useState(false);
@@ -47,6 +48,7 @@ export default function FlowWorkspace({ initialId, initialProjectId }: { initial
   const currentProject = projects.find(project => project.id === projectId);
   const visibleFlows = flows.filter(item => (item.projectId ?? "") === projectId);
   const locked = loading || busy || !!draft || editor;
+  const flowName = (item: FlowSummary) => currentProject && item.name.startsWith(`${currentProject.name} · `) ? item.name.slice(currentProject.name.length + 3) : item.name;
   const step = flow?.nodes.find(node => node.id === selected);
   const load = useCallback(async (id: string) => {
     const sequence = ++loadSequence.current;
@@ -83,10 +85,27 @@ export default function FlowWorkspace({ initialId, initialProjectId }: { initial
     return () => { current = false; sequence.current++; };
   }, [load, initialId, initialProjectId]);
   function selectProject(id: string) {
-    loadSequence.current++; setProjectId(id); setSnapshot(null); setSelected(null); setPhase(""); setError(""); setWarnings([]);
+    loadSequence.current++; setOrderStatus(""); setProjectId(id); setSnapshot(null); setSelected(null); setPhase(""); setError(""); setWarnings([]);
     window.history.replaceState(null, "", flowUrl(id));
     const first = flows.find(item => (item.projectId ?? "") === id);
     if (first) void load(first.id); else setLoading(false);
+  }
+  async function moveFlow(id: string, target: number) {
+    if (locked || target < 0 || target >= visibleFlows.length) return;
+    const expectedOrder = visibleFlows.map(item => item.id), flowIds = [...expectedOrder];
+    const from = flowIds.indexOf(id);
+    if (from < 0 || from === target) return;
+    flowIds.splice(from, 1); flowIds.splice(target, 0, id);
+    setBusy(true); setError(""); setOrderStatus("");
+    try {
+      const body = await readJson("/api/flow-order", { method: "PUT", headers: requestHeaders,
+        body: JSON.stringify({ projectId: projectId || null, expectedOrder, flowIds }) });
+      setFlows(current => [...current.filter(item => (item.projectId ?? "") !== projectId), ...body.flows]);
+      setOrderStatus(`${flowName(visibleFlows[from])} moved to position ${target + 1} of ${visibleFlows.length}.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save the order.");
+      await refresh().catch(() => {});
+    } finally { setBusy(false); }
   }
   async function saveProject() {
     setBusy(true); setProjectError("");
@@ -155,8 +174,18 @@ export default function FlowWorkspace({ initialId, initialProjectId }: { initial
         {projects.map(project => <option key={project.id} value={project.id}>{project.name} ({project.flowCount})</option>)}
         <option value="">Unassigned ({flows.filter(item => !item.projectId).length})</option>
       </select><Button variant="ghost" disabled={locked} onClick={() => { setProjectName(""); setProjectError(""); setProjectDialog("create"); }}><Plus size={14} />New project</Button></div>
-      <div className="flow-library-heading"><span>APPLICATION FLOWS</span><Button aria-label="Refresh flow list" variant="ghost" size="icon" disabled={locked} onClick={() => void refresh().catch(error => setError(error.message))}><RefreshCw size={14} /></Button></div>
-      <nav aria-label="Saved application flows">{visibleFlows.map(item => <button key={item.id} disabled={locked} className={`flow-library-item${snapshot?.flow.id === item.id && !creating ? " active" : ""}`} onClick={() => { setCreating(false); void load(item.id); }}><strong>{currentProject && item.name.startsWith(`${currentProject.name} · `) ? item.name.slice(currentProject.name.length + 3) : item.name}</strong><span>{item.nodes} steps · {item.edges} connections</span></button>)}</nav>
+      <div className="flow-library-heading"><span>APPLICATION FLOWS</span><Button aria-label="Refresh flow list" variant="ghost" size="icon" disabled={locked} onClick={() => { setBusy(true); void refresh().catch(error => setError(error.message)).finally(() => setBusy(false)); }}><RefreshCw size={14} /></Button></div>
+      {visibleFlows.length > 1 && <Button className="flow-arrange-toggle" variant="ghost" aria-pressed={arranging} disabled={locked} onClick={() => { setArranging(value => !value); setOrderStatus(""); }}>{arranging ? "Done arranging" : "Arrange flows"}</Button>}
+      {arranging && visibleFlows.length > 1 && <p className="flow-order-hint">Move flows to the top, up, or down. Changes save automatically.</p>}
+      <nav aria-label="Saved application flows">{visibleFlows.map((item, index) => <div className="flow-library-row" key={item.id}>
+        <button disabled={locked} className={`flow-library-item${snapshot?.flow.id === item.id && !creating ? " active" : ""}`} onClick={() => { setCreating(false); void load(item.id); }}><strong>{flowName(item)}</strong><span>{item.nodes} steps · {item.edges} connections</span></button>
+        {arranging && <div className="flow-order-controls"><span>{index + 1}</span>
+          <Button size="icon" variant="ghost" title="Move to top" aria-label={`Move ${flowName(item)} to top`} disabled={locked || index === 0} onClick={() => void moveFlow(item.id, 0)}><ChevronsUp size={14} /></Button>
+          <Button size="icon" variant="ghost" title="Move up" aria-label={`Move ${flowName(item)} up`} disabled={locked || index === 0} onClick={() => void moveFlow(item.id, index - 1)}><ArrowUp size={14} /></Button>
+          <Button size="icon" variant="ghost" title="Move down" aria-label={`Move ${flowName(item)} down`} disabled={locked || index === visibleFlows.length - 1} onClick={() => void moveFlow(item.id, index + 1)}><ArrowDown size={14} /></Button>
+        </div>}
+      </div>)}</nav>
+      <p className="sr-only" role="status" aria-live="polite">{orderStatus}</p>
       {!visibleFlows.length && <p className="flow-project-empty">No flows in this project yet.</p>}
       <Button variant="outline" disabled={locked} onClick={() => openEditor(emptyFlow(projectId), true)}><Plus size={15} />New flow</Button>
       <Button variant="ghost" disabled={locked} onClick={() => upload.current?.click()}><Upload size={15} />Import flow</Button>

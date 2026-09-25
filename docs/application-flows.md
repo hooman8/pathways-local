@@ -41,6 +41,17 @@ An empty `project` selects Unassigned. Exports include `projectId`; the UI impor
 into the selected project so exports from another installation remain usable.
 API imports must use a project ID that exists locally or set `projectId: null`.
 
+## Arranging flows
+
+Choose **Arrange flows** in the library to reveal **Move to top**, **Move up**, and
+**Move down** buttons. Changes save immediately for the selected project, including
+Unassigned. Choose **Done arranging** to hide the controls. Reordering keeps the
+currently open diagram selected and never changes its definition or revision.
+Editing a flow keeps its position; creating, importing, or moving one into a
+project appends it to that project's list. Existing lists retain their visible
+order when upgrading. A conflicting reorder or changed project membership is
+rejected and the UI refreshes the list before you try again.
+
 ## Local authoring API
 
 An agent or script running on the Mac can use these endpoints while the app runs.
@@ -55,7 +66,14 @@ The same [localhost checks](api.md#request-checks) protect every flow route.
 | `GET /api/flows/:id` | None | `{ flow, revision, updatedAt }`, or 404 |
 | `POST /api/flows/validate` | `{ flow }` | Normalized definition, `valid`, `issues`, `warnings`; never saves |
 | `POST /api/flows` | `{ flow }` | 201 with saved snapshot; 409 if ID exists |
+| `PUT /api/flow-order` | `{ projectId, expectedOrder, flowIds }` | `{ flows }` in saved order; 409 if the project list changed; 400 for an invalid permutation |
 | `PUT /api/flows/:id` | `{ flow, revision }` | Saved snapshot; 409 plus current `snapshot` if stale |
+
+To reorder through the API, read `/api/flows?projectId=<id>`, keep the returned
+IDs in `expectedOrder`, and put your new order in `flowIds`. Both arrays must
+include every flow in that project exactly once. Use `projectId: null` for
+Unassigned. The reorder is atomic and only touches display positions, allowing
+concurrent definition edits without invalidating their revisions.
 
 To group definitions through the API, read `/api/projects`, then use an existing
 project ID or POST a name with that response's workspace `revision`. Set a flow's
@@ -140,9 +158,12 @@ linked flows and phases for readability.
 
 ## Storage compatibility
 
-SQLite schema 3 stores project membership in each flow definition alongside its
-independent revision. Schema-1 and schema-2 databases upgrade without rewriting
-existing roadmaps, templates, or flow definitions; legacy flows read as Unassigned.
-Take a database backup before upgrading: older application versions reject schema
-3. A flow save never changes the roadmap workspace revision. Flow deletion and
-automatic merging of conflicting flow edits are not provided.
+SQLite schema 4 adds persistent display positions to the application-flow table.
+Schema-1, schema-2, and schema-3 databases upgrade without rewriting existing
+roadmaps, templates, or flow definitions. Legacy ungrouped flows read as Unassigned;
+existing lists retain their previous order. Older application versions reject
+schema 4, so take a full database backup before upgrading. A flow save or reorder
+never changes the roadmap workspace revision. Full SQLite backups include display
+order; individual flow JSON exports contain only the definition, and imports
+append to the selected project's list. Flow deletion and automatic merging of
+conflicting flow edits are not provided.

@@ -1,6 +1,13 @@
 import { assertLocalRequest, assertSameOrigin } from "./local-access";
 import { inspectFlow, type ApplicationFlow } from "./application-flow";
-import { localRepository, UnknownFlowProjectError } from "./sqlite-repository";
+import { localRepository, UnknownFlowProjectError, FlowOrderError } from "./sqlite-repository";
+import { z } from "zod";
+
+const flowOrderSchema = z.object({
+  projectId: z.string().min(1).max(100).nullable(),
+  expectedOrder: z.array(z.string().min(1).max(100)).max(10000),
+  flowIds: z.array(z.string().min(1).max(100)).max(10000),
+}).strict();
 
 const headers = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
@@ -23,7 +30,7 @@ async function bodyJson(request: Request) {
   try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { throw new RequestError(400, "Invalid JSON."); }
 }
 
-export async function flowsApi(request: Request, action: "list" | "get" | "create" | "update" | "validate", id?: string) {
+export async function flowsApi(request: Request, action: "list" | "get" | "create" | "update" | "validate" | "reorder", id?: string) {
   try {
     try { assertLocalRequest(request); if (!["list", "get"].includes(action)) assertSameOrigin(request); }
     catch (error) { return json({ error: error instanceof Error ? error.message : "Open the local workspace." }, 403); }
@@ -36,6 +43,12 @@ export async function flowsApi(request: Request, action: "list" | "get" | "creat
       return snapshot ? json(snapshot) : json({ error: "This flow does not exist." }, 404);
     }
     const body = await bodyJson(request);
+    if (action === "reorder") {
+      const parsed = flowOrderSchema.safeParse(body);
+      if (!parsed.success) return json({ error: "Send projectId, expectedOrder, and flowIds for the complete project list." }, 400);
+      const { projectId, expectedOrder, flowIds } = parsed.data;
+      return json({ flows: localRepository().reorderFlows(projectId, expectedOrder, flowIds) });
+    }
     const report = inspectFlow(body?.flow);
     if (!report.valid || !report.flow) return json({ valid: false, error: "Check the flow definition.", issues: report.issues, warnings: report.warnings }, 400);
     const flow: ApplicationFlow = report.flow;
@@ -54,6 +67,7 @@ export async function flowsApi(request: Request, action: "list" | "get" | "creat
     const current = localRepository().readFlow(id!);
     return current ? json({ error: "This flow changed since you opened it. Your draft has been kept.", snapshot: current }, 409) : json({ error: "This flow does not exist." }, 404);
   } catch (error) {
+    if (error instanceof FlowOrderError) return json({ error: error.message }, error.status);
     if (error instanceof UnknownFlowProjectError) return json({ error: error.message }, 400);
     if (error instanceof RequestError) return json({ error: error.message }, error.status);
     console.error("Application flow unavailable", error instanceof Error ? error.message : "Unknown error");
