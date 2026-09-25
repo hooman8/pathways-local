@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { type ApplicationFlow, type FlowSnapshot, type FlowSummary, type FlowProject } from "@/lib/application-flow";
+import ProjectTransfer from "./project-transfer";
 import FlowCanvas from "./flow-canvas";
 
 const requestHeaders = { "Content-Type": "application/json", "X-Pathways-Client": "1" };
@@ -33,8 +34,9 @@ function flowUrl(projectId: string, id?: string) {
   if (id) params.set("flow", id);
   return `/flows?${params}`;
 }
-export default function FlowWorkspace({ initialId, initialProjectId }: { initialId?: string; initialProjectId?: string }) {
+export default function FlowWorkspace({ initialId, initialProjectId, storage = "local" }: { initialId?: string; initialProjectId?: string; storage?: "local" | "hosted" }) {
   const [flows, setFlows] = useState<FlowSummary[]>([]), [snapshot, setSnapshot] = useState<FlowSnapshot | null>(null);
+  const [permissions, setPermissions] = useState({ canEdit: false, canCreate: false, canImport: false });
   const [projects, setProjects] = useState<FlowProject[]>([]), [projectId, setProjectId] = useState("");
   const [projectRevision, setProjectRevision] = useState(0), [projectDialog, setProjectDialog] = useState<"create" | "move" | null>(null);
   const [projectName, setProjectName] = useState(""), [moveTarget, setMoveTarget] = useState(""), [projectError, setProjectError] = useState("");
@@ -65,14 +67,14 @@ export default function FlowWorkspace({ initialId, initialProjectId }: { initial
   }, []);
   const refresh = useCallback(async () => {
     const [catalog, list] = await Promise.all([readJson("/api/projects"), readJson("/api/flows")]);
-    setProjects(catalog.projects); setProjectRevision(catalog.revision); setFlows(list.flows);
+    setProjects(catalog.projects); setProjectRevision(catalog.revision); setPermissions(catalog.permissions); setFlows(list.flows);
     return { projects: catalog.projects as FlowProject[], flows: list.flows as FlowSummary[] };
   }, []);
   useEffect(() => {
     let current = true; const sequence = loadSequence;
     Promise.all([readJson("/api/projects"), readJson("/api/flows")]).then(([catalog, list]) => {
       if (!current) return;
-      setProjects(catalog.projects); setProjectRevision(catalog.revision); setFlows(list.flows);
+      setProjects(catalog.projects); setProjectRevision(catalog.revision); setPermissions(catalog.permissions); setFlows(list.flows);
       if (initialId) { void load(initialId); return; }
       const target = initialProjectId ?? (list.flows.length ? list.flows[0].projectId ?? "" : catalog.projects[0]?.id ?? "");
       if (target && !catalog.projects.some((project: FlowProject) => project.id === target)) {
@@ -173,30 +175,35 @@ export default function FlowWorkspace({ initialId, initialProjectId }: { initial
       <div className="flow-project-picker"><label htmlFor="flow-project">PROJECT</label><select id="flow-project" value={projectId} disabled={locked} onChange={event => selectProject(event.target.value)}>
         {projects.map(project => <option key={project.id} value={project.id}>{project.name} ({project.flowCount})</option>)}
         <option value="">Unassigned ({flows.filter(item => !item.projectId).length})</option>
-      </select><Button variant="ghost" disabled={locked} onClick={() => { setProjectName(""); setProjectError(""); setProjectDialog("create"); }}><Plus size={14} />New project</Button></div>
+      </select><Button variant="ghost" disabled={locked || !permissions.canCreate} onClick={() => { setProjectName(""); setProjectError(""); setProjectDialog("create"); }}><Plus size={14} />New project</Button></div>
+      <ProjectTransfer projectId={projectId} disabled={locked} canImport={permissions.canImport} onError={setError} onImported={async result => {
+        await refresh(); setSnapshot(null); setProjectId(result.project.id); setError("");
+        window.history.replaceState(null, "", flowUrl(result.project.id));
+        if (result.flowIds[0]) await load(result.flowIds[0]);
+      }} />
       <div className="flow-library-heading"><span>APPLICATION FLOWS</span><Button aria-label="Refresh flow list" variant="ghost" size="icon" disabled={locked} onClick={() => { setBusy(true); void refresh().catch(error => setError(error.message)).finally(() => setBusy(false)); }}><RefreshCw size={14} /></Button></div>
-      {visibleFlows.length > 1 && <Button className="flow-arrange-toggle" variant="ghost" aria-pressed={arranging} disabled={locked} onClick={() => { setArranging(value => !value); setOrderStatus(""); }}>{arranging ? "Done arranging" : "Arrange flows"}</Button>}
+      {visibleFlows.length > 1 && <Button className="flow-arrange-toggle" variant="ghost" aria-pressed={arranging} disabled={locked || !permissions.canEdit} onClick={() => { setArranging(value => !value); setOrderStatus(""); }}>{arranging ? "Done arranging" : "Arrange flows"}</Button>}
       {arranging && visibleFlows.length > 1 && <p className="flow-order-hint">Move flows to the top, up, or down. Changes save automatically.</p>}
       <nav aria-label="Saved application flows">{visibleFlows.map((item, index) => <div className="flow-library-row" key={item.id}>
         <button disabled={locked} className={`flow-library-item${snapshot?.flow.id === item.id && !creating ? " active" : ""}`} onClick={() => { setCreating(false); void load(item.id); }}><strong>{flowName(item)}</strong><span>{item.nodes} steps · {item.edges} connections</span></button>
         {arranging && <div className="flow-order-controls"><span>{index + 1}</span>
-          <Button size="icon" variant="ghost" title="Move to top" aria-label={`Move ${flowName(item)} to top`} disabled={locked || index === 0} onClick={() => void moveFlow(item.id, 0)}><ChevronsUp size={14} /></Button>
-          <Button size="icon" variant="ghost" title="Move up" aria-label={`Move ${flowName(item)} up`} disabled={locked || index === 0} onClick={() => void moveFlow(item.id, index - 1)}><ArrowUp size={14} /></Button>
-          <Button size="icon" variant="ghost" title="Move down" aria-label={`Move ${flowName(item)} down`} disabled={locked || index === visibleFlows.length - 1} onClick={() => void moveFlow(item.id, index + 1)}><ArrowDown size={14} /></Button>
+          <Button size="icon" variant="ghost" title="Move to top" aria-label={`Move ${flowName(item)} to top`} disabled={locked || !permissions.canEdit || index === 0} onClick={() => void moveFlow(item.id, 0)}><ChevronsUp size={14} /></Button>
+          <Button size="icon" variant="ghost" title="Move up" aria-label={`Move ${flowName(item)} up`} disabled={locked || !permissions.canEdit || index === 0} onClick={() => void moveFlow(item.id, index - 1)}><ArrowUp size={14} /></Button>
+          <Button size="icon" variant="ghost" title="Move down" aria-label={`Move ${flowName(item)} down`} disabled={locked || !permissions.canEdit || index === visibleFlows.length - 1} onClick={() => void moveFlow(item.id, index + 1)}><ArrowDown size={14} /></Button>
         </div>}
       </div>)}</nav>
       <p className="sr-only" role="status" aria-live="polite">{orderStatus}</p>
       {!visibleFlows.length && <p className="flow-project-empty">No flows in this project yet.</p>}
-      <Button variant="outline" disabled={locked} onClick={() => openEditor(emptyFlow(projectId), true)}><Plus size={15} />New flow</Button>
-      <Button variant="ghost" disabled={locked} onClick={() => upload.current?.click()}><Upload size={15} />Import flow</Button>
+      <Button variant="outline" disabled={locked || !permissions.canEdit} onClick={() => openEditor(emptyFlow(projectId), true)}><Plus size={15} />New flow</Button>
+      <Button variant="ghost" disabled={locked || !permissions.canEdit} onClick={() => upload.current?.click()}><Upload size={15} />Import flow</Button>
       <input ref={upload} type="file" accept="application/json,.json" className="sr-only" aria-label="Import application flow JSON" onChange={event => { void importFile(event.target.files?.[0]); event.target.value = ""; }} />
-      <p className="flow-library-note">Design application behavior, approvals, timers, and recovery paths. Definitions are saved on this computer.</p>
+      <p className="flow-library-note">Design application behavior, approvals, timers, and recovery paths. {storage === "local" ? "Definitions are saved on this computer." : "Definitions are saved in the shared workspace."}</p>
     </aside>
     <main className="flow-main">
       <header className="flow-topbar"><span>{currentProject?.name ?? "Unassigned"} / Application flows</span><span className="flow-mode-badge">DESIGN VIEW</span></header>
       {error && <div className="flow-error" role="alert">{error}</div>}
-      {loading ? <div className="flow-empty" role="status">Loading flows…</div> : !flow ? <div className="flow-empty"><GitBranch size={34} /><h1>{currentProject ? `${currentProject.name} workflows` : "Map how your application works"}</h1><p>Create or import a flow in {currentProject?.name ?? "Unassigned"}.</p><Button onClick={() => openEditor(emptyFlow(projectId), true)}>Create your first flow</Button></div> : <>
-        <div className="flow-heading"><div><div className="flow-eyebrow">{currentProject?.name ?? "Unassigned"} · APPLICATION BEHAVIOR</div><h1>{flow.name}</h1><p>{flow.description}</p></div><div className="flow-actions"><Button variant="outline" disabled={locked} onClick={() => { setMoveTarget(projectId); setProjectError(""); setProjectDialog("move"); }}><FolderOpen size={15} />Move to project</Button><Button variant="outline" disabled={busy} onClick={() => openEditor(flow, !!draft && creating)}><Braces size={15} />Edit definition</Button><Button variant="outline" onClick={() => download(flow)}><Download size={15} />Export</Button></div></div>
+      {loading ? <div className="flow-empty" role="status">Loading flows…</div> : !flow ? <div className="flow-empty"><GitBranch size={34} /><h1>{currentProject ? `${currentProject.name} workflows` : "Map how your application works"}</h1><p>Create or import a flow in {currentProject?.name ?? "Unassigned"}.</p><Button disabled={!permissions.canEdit} onClick={() => openEditor(emptyFlow(projectId), true)}>Create your first flow</Button></div> : <>
+        <div className="flow-heading"><div><div className="flow-eyebrow">{currentProject?.name ?? "Unassigned"} · APPLICATION BEHAVIOR</div><h1>{flow.name}</h1><p>{flow.description}</p></div><div className="flow-actions"><Button variant="outline" disabled={locked || !permissions.canEdit} onClick={() => { setMoveTarget(projectId); setProjectError(""); setProjectDialog("move"); }}><FolderOpen size={15} />Move to project</Button><Button variant="outline" disabled={busy || !permissions.canEdit} onClick={() => openEditor(flow, !!draft && creating)}><Braces size={15} />Edit definition</Button><Button variant="outline" onClick={() => download(flow)}><Download size={15} />Export</Button></div></div>
         {draft && <div className="flow-draft" role="status"><span><strong>Draft preview</strong> · Review before saving.</span><div><Button variant="ghost" disabled={busy} onClick={() => { setDraft(null); setCreating(false); setError(""); setWarnings([]); }}>Discard draft</Button><Button disabled={busy} onClick={() => void save()}><Check size={15} />{busy ? "Saving…" : "Save flow"}</Button></div></div>}
         {!!warnings.length && <div className="flow-warning">{warnings.join(" ")}</div>}
         <div className="flow-toolbar"><div className="flow-view-tabs"><button aria-pressed={view === "diagram"} onClick={() => setView("diagram")}>Diagram</button><button aria-pressed={view === "steps"} onClick={() => setView("steps")}>Steps</button></div><label>Phase <select value={phase} onChange={event => { setPhase(event.target.value); setSelected(null); }}><option value="">All phases</option>{[...new Set(flow.nodes.map(node => node.phase).filter(Boolean))].map(phase => <option key={phase}>{phase}</option>)}</select></label><span>{flow.nodes.length} steps · {flow.edges.length} connections{snapshot && !creating ? ` · Revision ${snapshot.revision}` : ""}</span></div>

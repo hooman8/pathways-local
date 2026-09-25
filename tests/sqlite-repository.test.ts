@@ -8,6 +8,7 @@ import { SqliteRepository, UnknownFlowProjectError, FlowOrderError } from "../li
 import { WorkspaceStore, WorkspaceError } from "../lib/workspace-store";
 import { localOwner } from "../lib/local-access";
 import { saveProjectTemplate, createProject } from "../lib/projects";
+import { transferFixture } from "./bundle-fixture";
 import { exampleFlow } from "./flow-fixture";
 
 function fixture() {
@@ -61,11 +62,11 @@ test("opening a newer SQLite schema refuses to downgrade it", () => {
   const { directory } = fixture();
   const filename = join(directory, "newer.sqlite");
   const database = new DatabaseSync(filename);
-  database.exec("PRAGMA user_version = 5;"); database.close();
+  database.exec("PRAGMA user_version = 6;"); database.close();
   try {
     assert.throws(() => new SqliteRepository(filename), /newer Pathways/);
     const check = new DatabaseSync(filename);
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 5);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 6);
     check.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -105,7 +106,7 @@ test("schema 1 migration adds flow storage without changing the existing workspa
     assert.equal(repository.listFlows().length, 0);
     assert.equal(repository.createFlow(exampleFlow())?.revision, 1);
     const check = new DatabaseSync(filename);
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 4); check.close();
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 5); check.close();
   } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -151,7 +152,7 @@ test("schema 2 definitions without projectId open as Unassigned without rewritin
     assert.equal(repository.listFlows(null)[0].projectId, null);
     const check = new DatabaseSync(filename);
     assert.equal(check.prepare("SELECT definition FROM application_flows").get()!.definition, JSON.stringify(legacy));
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 4); check.close();
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 5); check.close();
   } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -210,5 +211,31 @@ test("schema 3 migration freezes the existing display order without editing defi
     for (const row of expected) assert.deepEqual(repository.readFlow(String(row.id)), { flow: JSON.parse(String(row.definition)), revision: row.revision, updatedAt: row.updated_at });
     repository.close(); repository = new SqliteRepository(filename);
     assert.deepEqual(repository.listFlows(null).map(flow => flow.id), ["b", "a", "c"]);
+  } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("complete project imports are atomic and retries return the same imported project", async () => {
+  const { directory, filename } = fixture();
+  const repository = new SqliteRepository(filename);
+  try {
+    const initial = await new WorkspaceStore(repository, localOwner.email).get(localOwner);
+    const { bundle } = transferFixture();
+    const request = { bundle, revision: initial.revision, importId: crypto.randomUUID() };
+    const injected = new DatabaseSync(filename);
+    injected.exec("CREATE TRIGGER fail_import BEFORE INSERT ON application_flows WHEN (SELECT COUNT(*) FROM application_flows) = 1 BEGIN SELECT RAISE(ABORT, 'injected failure'); END;");
+    assert.throws(() => repository.importProjectBundle(request), /injected failure/);
+    assert.deepEqual(await new WorkspaceStore(repository, localOwner.email).get(localOwner), initial);
+    assert.equal(repository.listFlows().length, 0);
+    injected.exec("DROP TRIGGER fail_import;"); injected.close();
+    const imported = repository.importProjectBundle(request);
+    assert.deepEqual(repository.importProjectBundle(request), imported);
+    const exported = repository.exportProjectBundle(imported.project.id);
+    assert.deepEqual(exported.flowOrder, imported.flowIds);
+    assert.equal(exported.flows[0].nodes.find(node => node.id === "work")!.subflowId, imported.flowIds[1]);
+    assert.equal((await repository.read())!.workspace.projects.length, 2);
+    assert.throws(() => repository.importProjectBundle({ ...request, name: "changed" }), /already used/);
+    assert.throws(() => repository.importProjectBundle({ ...request, importId: crypto.randomUUID() }), /workspace changed/);
+    assert.equal(repository.listFlows().length, 2);
   } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });

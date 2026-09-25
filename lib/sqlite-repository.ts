@@ -1,6 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { exportBundle, prepareBundleImport, type BundleImportResult } from "./project-bundle";
+import { parseTransfer } from "./project-transfer-request";
+import { content } from "./shared";
+import { WorkspaceError } from "./workspace-store";
 import { validateWorkspace } from "./projects";
 import type { WorkspaceRepository, WorkspaceState } from "./workspace-store";
 import { validateFlow, type ApplicationFlow, type FlowSnapshot, type FlowSummary } from "./application-flow";
@@ -23,7 +27,7 @@ export class SqliteRepository implements WorkspaceRepository {
       this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       this.db.exec("BEGIN IMMEDIATE"); migrating = true;
       const version = this.db.prepare("PRAGMA user_version").get()?.user_version;
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new Error("This database was created by a newer Pathways Local version.");
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new Error("This database was created by a newer Pathways Local version.");
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS workspace (
           id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -39,7 +43,7 @@ export class SqliteRepository implements WorkspaceRepository {
             CHECK (json_extract(definition, '$.id') = id)
         ) STRICT;
       `);
-      if (version !== 4) {
+      if (Number(version) < 4) {
         this.db.exec(`
           ALTER TABLE application_flows ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
           WITH ranked AS (
@@ -50,6 +54,7 @@ export class SqliteRepository implements WorkspaceRepository {
           PRAGMA user_version = 4;
         `);
       }
+      this.db.exec(`CREATE TABLE IF NOT EXISTS project_imports (id TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL CHECK(json_valid(result))) STRICT; PRAGMA user_version = 5;`);
       this.db.exec("COMMIT"); migrating = false;
     } catch (error) { if (migrating) this.db.exec("ROLLBACK"); this.db.close(); throw error; }
   }
@@ -128,6 +133,40 @@ export class SqliteRepository implements WorkspaceRepository {
       const flows = this.listFlows(projectId);
       this.db.exec("COMMIT");
       return flows;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  exportProjectBundle(projectId: string) {
+    this.db.exec("BEGIN");
+    try {
+      const row = this.db.prepare("SELECT state FROM workspace WHERE id = 1").get();
+      if (!row) throw new WorkspaceError(404, "This workspace does not exist.");
+      const state = JSON.parse(String(row.state)) as WorkspaceState;
+      const bundle = exportBundle(validateWorkspace(state.workspace), projectId, this.listFlows(projectId).map(flow => this.readFlow(flow.id)!.flow));
+      this.db.exec("COMMIT"); return bundle;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  importProjectBundle(input: unknown): BundleImportResult {
+    const request = parseTransfer(input);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const receipt = this.db.prepare("SELECT digest,result FROM project_imports WHERE id = ?").get(request.importId);
+      if (receipt) {
+        if (receipt.digest !== request.digest) throw new WorkspaceError(409, "This import ID was already used for a different project file.");
+        this.db.exec("COMMIT"); return JSON.parse(String(receipt.result));
+      }
+      const row = this.db.prepare("SELECT state FROM workspace WHERE id = 1").get();
+      if (!row) throw new WorkspaceError(404, "Open the workspace before importing.");
+      const state = JSON.parse(String(row.state)) as WorkspaceState;
+      if (state.revision !== request.revision) throw new WorkspaceError(409, "The workspace changed. Refresh and review the import again.");
+      const prepared = prepareBundleImport(validateWorkspace(state.workspace), request.bundle, request.name);
+      if (Buffer.byteLength(JSON.stringify(prepared.workspace)) > 1_500_000) throw new WorkspaceError(413, "This import would exceed the workspace size limit.");
+      const next = { ...state, workspace: content(prepared.workspace), revision: state.revision + 1, updatedAt: new Date().toISOString(), updatedBy: "Local owner" };
+      this.db.prepare("UPDATE workspace SET revision = ?,state = ? WHERE id = 1").run(next.revision, JSON.stringify(next));
+      for (const flow of prepared.flows) { if (!this.createFlow(flow)) throw new Error("Generated flow ID collision; retry the import."); }
+      this.db.prepare("INSERT INTO project_imports (id,digest,result) VALUES (?,?,?)").run(request.importId, request.digest, JSON.stringify(prepared.result));
+      this.db.exec("COMMIT"); return prepared.result;
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
 
