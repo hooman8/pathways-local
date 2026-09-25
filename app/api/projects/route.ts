@@ -17,7 +17,7 @@ async function handle(request: Request, create: boolean) {
     const current = await store.get(localOwner);
     if (!create) {
       const flows = repository.listFlows();
-      return json({ revision: current.revision, projects: current.workspace!.projects.map(project => ({
+      return json({ permissions: { canEdit: true, canCreate: true, canImport: true }, revision: current.revision, projects: current.workspace!.projects.map(project => ({
         id: project.id, name: project.roadmap.application, flowCount: flows.filter(flow => flow.projectId === project.id).length,
       })), unassignedCount: flows.filter(flow => flow.projectId === null).length });
     }

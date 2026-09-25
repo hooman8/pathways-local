@@ -148,3 +148,11 @@ same origin, the app offers **Review browser projects** directly.
 
 For migration from the current cloud edition, use **Export workspace & templates**
 there, then **Import** here. Changes remain independent after import.
+
+## Application flows and complete project transfers
+
+Open **Application flows** from the sidebar to model application behavior, group
+flows by project, and arrange their reading order. Use **Export complete project**
+and **Import complete project** to carry both a roadmap and its flows to another
+instance. See [application flows](application-flows.md) and
+[complete project transfers](project-transfers.md).

@@ -124,3 +124,11 @@ PWA. There is no multi-user login, cloud synchronization, audit history, or undo
 [MIT](LICENSE). Original Pathways and third-party notices are preserved; see
 [third-party notices](THIRD_PARTY_NOTICES.md). `private: true` in `package.json`
 prevents accidental npm publication and does not make this repository private.
+
+## Complete projects and application flows
+
+Use **Application flows** to group, edit, and arrange behavior diagrams within a
+project. **Export complete project** and **Import complete project** transfer its
+roadmap and all ordered flows between compatible local and hosted instances.
+See [project transfers](docs/project-transfers.md) and
+[application flows](docs/application-flows.md).

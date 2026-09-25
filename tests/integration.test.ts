@@ -201,6 +201,29 @@ test("production app works with only a local SQLite database", { timeout: 120000
       assert.deepEqual(await snapshot(), latest);
       assert.deepEqual((await (await flowRequest("?projectId=")).json()).flows.map((flow: { id: string }) => flow.id), ["outside"]);
     });
+    await t.test("complete project HTTP transfers preserve order and retry without duplicating", async () => {
+      const transfer = (path = "", method = "GET", body?: unknown, extra: Record<string, string> = {}) => fetch(`${origin}/api/project-bundles${path}`, {
+        method, headers: { "Content-Type": "application/json", "X-Pathways-Client": "1", Origin: origin, ...extra }, ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const exported = await transfer(`?projectId=${savedFlow!.flow.projectId}`);
+      assert.equal(exported.status, 200, await exported.clone().text());
+      const bundle = await exported.json();
+      assert.deepEqual(bundle.flowOrder, expectedFlowOrder!);
+      const body = { bundle, revision: latest.revision, importId: crypto.randomUUID() };
+      assert.equal((await transfer("", "POST", body, { Origin: "https://attacker.example" })).status, 403);
+      assert.equal((await transfer("", "POST", { ...body, bundle: { ...bundle, flowOrder: [] } })).status, 400);
+      assert.deepEqual(await snapshot(), latest);
+      const importedResponse = await transfer("", "POST", body);
+      assert.equal(importedResponse.status, 201, await importedResponse.clone().text());
+      const imported = await importedResponse.json();
+      assert.notEqual(imported.project.id, bundle.project.id);
+      assert.deepEqual(await (await transfer("", "POST", body)).json(), imported);
+      const roundtrip = await (await transfer(`?projectId=${imported.project.id}`)).json();
+      assert.deepEqual(roundtrip.flowOrder, imported.flowIds);
+      assert.deepEqual(roundtrip.flows.map((flow: { name: string }) => flow.name), bundle.flows.map((flow: { name: string }) => flow.name));
+      latest = await snapshot();
+      assert.equal(latest.revision, body.revision + 1);
+    });
     await t.test("a complete server restart preserves projects, templates, and revision", async () => {
       await stop(); await start();
       assert.deepEqual(await snapshot(), latest);

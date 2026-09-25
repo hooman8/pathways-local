@@ -47,9 +47,9 @@ the original cloud application. It does not synchronize the two copies.
 Application flows have their own **Export** and **Import flow** actions. Workspace
 JSON exports omit them; a full database backup includes all flows and roadmaps.
 
-The flow-ordering update migrates SQLite schema 1, 2, or 3 to schema 4 when the
+The complete-project update migrates SQLite schema 1 through 4 to schema 5 when the
 database is first opened. It preserves existing content and display order; older
-ungrouped flows appear in Unassigned until moved to a project. Older images reject schema 4, so keep a pre-update backup if you need to roll back the application version.
+ungrouped flows appear in Unassigned until moved to a project. Older images reject schema 5, so keep a pre-update backup if you need to roll back the application version.
 
 For an exact database backup, stop writes and copy the entire data directory:
 
@@ -84,3 +84,6 @@ application version or use a compatible backup; do not manually lower the SQLite
 schema version. A code rollback does not undo database edits.
 
 The application has no cloud resources to provision or billing settings to manage.
+
+Use **Export complete project** for a portable project with both its roadmap and
+ordered application flows. See [project transfers](project-transfers.md).

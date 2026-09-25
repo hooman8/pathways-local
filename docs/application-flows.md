@@ -17,7 +17,7 @@ to pan the diagram.
 preview. Drafts remain in browser memory; export them before closing the page.
 On a revision conflict, export your draft, discard it, select the saved flow again,
 then apply your changes to the latest definition. Flow exports contain one raw
-definition; linked subflows must be exported separately. Roadmap workspace exports
+definition; use **Export complete project** to include all of its linked flows and their order. Roadmap workspace exports
 do not include application flows. A full SQLite backup includes both.
 
 ## Projects
@@ -158,12 +158,15 @@ linked flows and phases for readability.
 
 ## Storage compatibility
 
-SQLite schema 4 adds persistent display positions to the application-flow table.
-Schema-1, schema-2, and schema-3 databases upgrade without rewriting existing
+SQLite schema 5 retains persistent display positions and adds durable project-import receipts.
+Schema-1 through schema-4 databases upgrade without rewriting existing
 roadmaps, templates, or flow definitions. Legacy ungrouped flows read as Unassigned;
 existing lists retain their previous order. Older application versions reject
-schema 4, so take a full database backup before upgrading. A flow save or reorder
+schema 5, so take a full database backup before upgrading. A flow save or reorder
 never changes the roadmap workspace revision. Full SQLite backups include display
 order; individual flow JSON exports contain only the definition, and imports
 append to the selected project's list. Flow deletion and automatic merging of
 conflicting flow edits are not provided.
+
+For a portable project that includes the roadmap, flows, order, and links, use
+[complete project transfers](project-transfers.md).

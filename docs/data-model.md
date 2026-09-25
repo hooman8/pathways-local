@@ -106,7 +106,7 @@ A single `workspace` row contains `id = 1`, `revision`, and a JSON `state` with
 workspace content, local membership, timestamps, and revision. A SQL constraint
 keeps the JSON revision consistent with the indexed revision. The whole row is
 updated atomically using a revision predicate. Reads see one complete snapshot.
-Schema version 2 is recorded with `PRAGMA user_version`. A separate
+Schema version 5 is recorded with `PRAGMA user_version`. A separate
 `application_flows` table stores each definition's `id`, `revision`, `updated_at`,
 and JSON `definition`. Each flow has an independent revision. The schema-1 upgrade
 adds that table without modifying the workspace row. See
@@ -153,3 +153,7 @@ to each project (or Unassigned). Reordering is transactional and compares the
 previous complete ID order before updating positions; it leaves definitions,
 revision numbers, and modification timestamps untouched. New and moved flows
 append to the destination list.
+
+Schema 5 adds `project_imports`, storing the import ID, content digest, and result
+for safe retries. Complete project imports update the workspace, flow definitions,
+positions, and receipt in one transaction. See [project transfers](project-transfers.md).
