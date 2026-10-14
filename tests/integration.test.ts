@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,6 +11,9 @@ import { saveProjectTemplate, mergeProjectImport, parseProjectImport } from "../
 import type { SharedSnapshot } from "../lib/shared";
 import { exampleFlow } from "./flow-fixture";
 import type { FlowSnapshot } from "../lib/application-flow";
+import { architectureFixture } from "./architecture-fixture";
+import { agentDraft } from "./authoring-fixture";
+import * as hostedBundle from "./hosted-contract/project-bundle";
 
 // An OS-assigned port and a fresh temporary database isolate every run from the
 // user's local workspace. These tests never import cloud SDKs or credentials.
@@ -38,7 +41,7 @@ test("production app works with only a local SQLite database", { timeout: 120000
   }
   async function start() {
     server = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), "start", "--hostname", "127.0.0.1", "--port", String(port)], {
-      cwd: root, env: { ...process.env, NODE_ENV: "production", APP_BASE_URL: origin, PATHWAYS_DB_PATH: join(directory, "workspace.sqlite"), NEXT_TELEMETRY_DISABLED: "1" }, stdio: ["ignore", "pipe", "pipe"],
+      cwd: root, env: { ...process.env, NODE_ENV: "production", APP_BASE_URL: origin, PATHWAYS_DB_PATH: join(directory, "workspace.sqlite"), PATHWAYS_AI_SETTINGS_PATH: join(directory, "ai-credentials.json"), OPENAI_API_KEY: "", OPENAI_MODEL: "gpt-6-astra", PATHWAYS_OPENAI_ENABLED: "true", NEXT_TELEMETRY_DISABLED: "1" }, stdio: ["ignore", "pipe", "pipe"],
     });
     for (const stream of [server.stdout!, server.stderr!]) stream.on("data", chunk => { logs = (logs + chunk).slice(-12000); });
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -224,11 +227,95 @@ test("production app works with only a local SQLite database", { timeout: 120000
       latest = await snapshot();
       assert.equal(latest.revision, body.revision + 1);
     });
-    await t.test("a complete server restart preserves projects, templates, and revision", async () => {
+    const localRequest = (path: string, method = "GET", body?: unknown, extra: Record<string, string> = {}) => fetch(`${origin}${path}`, {
+      method, headers: { "Content-Type": "application/json", "X-Pathways-Client": "1", Origin: origin, ...extra },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10000),
+    });
+    let agentProjectId: string, agentSessionId: string;
+    await t.test("local AI settings never return a key and reject cross-site reads and writes", async () => {
+      assert.equal((await localRequest("/api/ai/settings", "GET", undefined, { Origin: "https://attacker.example" })).status, 403);
+      assert.equal((await localRequest("/api/ai/settings", "PUT", { apiKey: "sk-fake-integration-key-not-real" }, { "X-Pathways-Client": "" })).status, 403);
+      const key = "sk-fake-integration-key-not-real";
+      const saved = await localRequest("/api/ai/settings", "PUT", { apiKey: key });
+      assert.equal(saved.status, 200); assert.ok(!(await saved.text()).includes(key));
+      assert.equal((await (await localRequest("/api/ai/settings")).json()).configured, true);
+      assert.equal((await localRequest("/api/ai/settings", "PUT", { apiKey: "invalid" })).status, 400);
+      assert.equal((await localRequest("/api/ai/settings", "DELETE")).status, 200);
+      assert.equal((await (await localRequest("/api/ai/settings")).json()).configured, false);
+    });
+    await t.test("an agent can discover capabilities and author complex linked drafts without a provider key", async () => {
+      const cli = spawnSync(process.execPath, [join(root, "scripts/pathways-agent.mjs"), "capabilities", "--url", origin], { encoding: "utf8" });
+      assert.equal(cli.status, 0, cli.stderr);
+      assert.equal(JSON.parse(cli.stdout).apiKeyRequired, false);
+      assert.equal((await localRequest("/api/agent", "GET", undefined, { Origin: "https://attacker.example" })).status, 403);
+      const catalog = await (await localRequest("/api/projects")).json();
+      const created = await localRequest("/api/projects", "POST", { name: "Agent authoring", revision: catalog.revision });
+      assert.equal(created.status, 201); agentProjectId = (await created.json()).project.id;
+      const context = await (await localRequest(`/api/agent/project?projectId=${agentProjectId}`)).json();
+      assert.deepEqual(context.base, []);
+      const body = { requestId: crypto.randomUUID(), projectId: agentProjectId, diagramType: "workflow", base: context.base, proposal: agentDraft() };
+      assert.equal((await localRequest("/api/agent/proposals", "POST", body, { Origin: "https://attacker.example" })).status, 403);
+      const proposed = await localRequest("/api/agent/proposals", "POST", body);
+      assert.equal(proposed.status, 201, await proposed.clone().text());
+      const result = await proposed.json(); agentSessionId = result.session.id;
+      assert.match(result.reviewUrl, /draft=/);
+      assert.equal((await (await flowRequest(`?projectId=${agentProjectId}`)).json()).flows.length, 0);
+      assert.deepEqual(await (await localRequest("/api/agent/proposals", "POST", body)).json(), result);
+      const apply = { revision: result.session.revision, proposalId: result.session.proposal.id };
+      const saved = await localRequest(result.applyUrl, "POST", apply);
+      assert.equal(saved.status, 200, await saved.clone().text());
+      assert.equal((await saved.json()).session.status, "applied");
+      assert.equal((await localRequest(result.applyUrl, "POST", apply)).status, 200);
+      assert.equal((await (await flowRequest(`?projectId=${agentProjectId}`)).json()).flows.length, 2);
+      const ai = await localRequest("/api/ai/sessions", "POST", { projectId: agentProjectId, sessionId: crypto.randomUUID() });
+      assert.equal(ai.status, 201); const idle = (await ai.json()).session;
+      assert.equal((await localRequest(`/api/ai/sessions/${idle.id}/messages`, "POST", { revision: idle.revision, requestId: crypto.randomUUID(), message: "Create more" })).status, 503, "Astra requires the user's key but local agents do not");
+    });
+    await t.test("architecture agent drafts coexist with workflows and transfer through the hosted contract", async () => {
+      assert.equal((await fetch(`${origin}/architecture?project=${agentProjectId}`)).status, 200);
+      const context = await (await localRequest(`/api/agent/project?projectId=${agentProjectId}`)).json();
+      const { version: _version, projectId: _project, ...architecture } = architectureFixture();
+      architecture.presentationNotes = "Explain components, boundaries, and the two-way synchronization relationship.";
+      const body = { requestId: crypto.randomUUID(), projectId: agentProjectId, diagramType: "architecture", base: context.base, proposal: { summary: "Add architecture", assumptions: [], flows: [architecture], flowOrder: [...context.base.map((item: { id: string }) => item.id), architecture.id] } };
+      const response = await localRequest("/api/agent/proposals", "POST", body);
+      assert.equal(response.status, 201, await response.clone().text()); const proposed = await response.json();
+      assert.match(proposed.reviewUrl, /^\/architecture\?/);
+      assert.equal((await localRequest(proposed.applyUrl, "POST", { revision: proposed.session.revision, proposalId: proposed.session.proposal.id })).status, 200);
+      const exported = await (await localRequest(`/api/project-bundles?projectId=${agentProjectId}`)).json();
+      const bundle = hostedBundle.validateBundle(exported);
+      assert.equal(bundle.flows.length, 3);
+      assert.equal(bundle.flows[2].diagramType, "architecture");
+      assert.equal(bundle.flows[2].edges.find(edge => edge.direction === "both")?.direction, "both");
+      assert.equal(bundle.flows[2].presentationNotes, architecture.presentationNotes);
+      assert.equal(bundle.flows[0].nodes.find(node => node.id === "work")!.subflowId, bundle.flows[1].id);
+      const localCatalog = await (await localRequest("/api/projects")).json();
+      const imported = await localRequest("/api/project-bundles", "POST", { bundle, revision: localCatalog.revision, importId: crypto.randomUUID() });
+      assert.equal(imported.status, 201); const copy = await imported.json();
+      const roundtrip = hostedBundle.validateBundle(await (await localRequest(`/api/project-bundles?projectId=${copy.project.id}`)).json());
+      assert.deepEqual(roundtrip.flows[2].groups, bundle.flows[2].groups);
+      assert.deepEqual(roundtrip.flows[2].edges, bundle.flows[2].edges);
+      assert.equal(roundtrip.flows[0].nodes.find(node => node.id === "work")!.subflowId, roundtrip.flows[1].id);
+      assert.ok(!JSON.stringify(roundtrip).includes("sk-fake"));
+      latest = await snapshot();
+    });
+    await t.test("stale multi-diagram agent drafts cannot overwrite a later edit", async () => {
+      const context = await (await localRequest(`/api/agent/project?projectId=${agentProjectId}`)).json();
+      const existing = context.flows[0];
+      const { version: _version, projectId: _project, ...flow } = existing.flow;
+      const response = await localRequest("/api/agent/proposals", "POST", { requestId: crypto.randomUUID(), projectId: agentProjectId, diagramType: "workflow", base: context.base,
+        proposal: { summary: "Agent edit", assumptions: [], flows: [{ ...flow, name: "Agent edit" }], flowOrder: context.base.map((item: { id: string }) => item.id) } });
+      assert.equal(response.status, 201); const draft = await response.json();
+      assert.equal((await flowRequest(`/${flow.id}`, "PUT", { flow: { ...existing.flow, name: "Later human edit" }, revision: existing.revision })).status, 200);
+      assert.equal((await localRequest(draft.applyUrl, "POST", { revision: draft.session.revision, proposalId: draft.session.proposal.id })).status, 409);
+      assert.equal((await (await flowRequest(`/${flow.id}`)).json()).flow.name, "Later human edit");
+    });
+    await t.test("a complete server restart preserves projects, templates, authoring drafts, and revision", async () => {
       await stop(); await start();
       assert.deepEqual(await snapshot(), latest);
       assert.deepEqual(await (await flowRequest(`/${savedFlow.flow.id}`)).json(), savedFlow);
       assert.deepEqual((await (await flowRequest(`?projectId=${savedFlow.flow.projectId}`)).json()).flows.map((flow: { id: string }) => flow.id), expectedFlowOrder);
+      assert.equal((await (await localRequest(`/api/ai/sessions/${agentSessionId}`)).json()).session.status, "applied");
+      assert.equal((await (await flowRequest(`?projectId=${agentProjectId}`)).json()).flows.length, 3);
     });
   } catch (error) { console.error(logs); throw error; }
   finally { await stop(); await rm(directory, { recursive: true, force: true }); }

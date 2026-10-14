@@ -1,12 +1,14 @@
 # Pathways Local
 
+Version **1.1.0** adds Architecture, optional Astra with your own OpenAI API key, and a local agent API/CLI. See [release notes](CHANGELOG.md).
+
 [![Validate](https://github.com/hooman8/pathways-local/actions/workflows/check.yml/badge.svg)](https://github.com/hooman8/pathways-local/actions/workflows/check.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A self-contained workspace for planning application onboarding and project roadmaps.
 Run it on your Mac with Docker Desktop. Projects, templates, assignments, and
 progress are stored in a local SQLite database. No Google Cloud, Firebase account,
-API keys, or sign-in are required.
+API keys, or sign-in are required for the core workspace.
 
 This is the independent local edition of
 [Pathways](https://github.com/hooman8/pathways-roadmap), with the same dependency
@@ -29,7 +31,7 @@ for your Mac's architecture, including Apple silicon and Intel.
 
 The first build downloads the Node image and npm packages. Once built, the
 application runs without internet access. Fonts, icons, and scripts are bundled;
-there are no cloud storage, authentication, or runtime API dependencies.
+there are no cloud storage or authentication dependencies. Optional Astra authoring needs internet access and your own OpenAI API key; local agents use the local API without giving Pathways a key.
 
 This edition is for **one local user**. Everyone who can access the service on your
 computer has owner access. Compose binds the port to `127.0.0.1`; keep that binding
@@ -82,6 +84,9 @@ and exports do not belong in this public repository.
   retries, linked subflows, project grouping, and a local API for agent-generated definitions.
   Projects hold both roadmaps and application flows; create or switch projects in
   the flow sidebar and move existing flows between them.
+- Architecture diagrams with component groups, two-way relationships, expanded views, and presenter notes.
+- Optional **Build with AI** using Astra and a user-supplied OpenAI API key.
+- **Use a local agent**, a discoverable proposal API, and a CLI for validated multi-diagram drafts and atomic Apply.
 
 **Stack:** Next.js 16, React 19, TypeScript, React Flow, ELK.js, Tailwind CSS 4,
 shadcn/ui, Node.js 22, and SQLite through Node's built-in `node:sqlite` module.
@@ -110,14 +115,16 @@ including a server restart. No cloud credentials, emulators, or Java are needed.
 | Storage, API, and code map | [Architecture](docs/architecture.md) |
 | Task rules and compatibility | [Data model](docs/data-model.md) |
 | API and localhost request checks | [API reference](docs/api.md) |
-| Application diagrams and agent authoring API | [Application flows](docs/application-flows.md) |
+| Application behavior diagrams | [Application flows](docs/application-flows.md) |
+| Component diagrams and boundaries | [Architecture view](docs/architecture-diagrams.md) |
+| Your API key and local agents | [AI and agent authoring](docs/ai-authoring.md) |
 | Docker, updates, and backups | [Operations](docs/deployment.md) |
 | Using the roadmap | [User guide](docs/user-guide.md) |
 | Contributions and security | [Contributing](CONTRIBUTING.md), [Security](SECURITY.md) |
 
 One installation serves one workspace, with up to 100 projects, 100 templates, and
 120 tasks per roadmap. The app must be running to edit; it is not an offline browser
-PWA. There is no multi-user login, cloud synchronization, audit history, or undo.
+PWA. There is no multi-user login, cloud synchronization, or undo. Authoring Apply receipts are stored locally; they are not a full workspace audit history.
 
 ## License
 
@@ -132,3 +139,11 @@ project. **Export complete project** and **Import complete project** transfer it
 roadmap and all ordered flows between compatible local and hosted instances.
 See [project transfers](docs/project-transfers.md) and
 [application flows](docs/application-flows.md).
+
+## AI and local agents
+
+In Application flows or Architecture, choose **AI settings** to save your own OpenAI API key, then **Build with AI** to use Astra. There is no Pathways AI subscription. OpenAI bills your API usage to the key owner; the key stays on your local server and is excluded from exports. Core features continue working without a key or internet access.
+
+Choose **Use a local agent** to copy project-specific instructions for an agent on your computer, or run `npm run agent -- capabilities`. Agents can read definitions, validate proposals, create linked diagrams, and return a review link. Proposing does not change saved content; Apply saves the reviewed set atomically and rejects stale revisions. See [the authoring guide](docs/ai-authoring.md).
+
+For private/local transfers, use **Export complete project**. The same version-1 bundle preserves roadmaps, architecture groups and directions, workflows, saved order, internal links, and presenter notes. Accounts, credentials, and authoring conversations do not transfer. Install an edition that supports Architecture before importing architecture files.

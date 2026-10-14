@@ -62,11 +62,11 @@ test("opening a newer SQLite schema refuses to downgrade it", () => {
   const { directory } = fixture();
   const filename = join(directory, "newer.sqlite");
   const database = new DatabaseSync(filename);
-  database.exec("PRAGMA user_version = 6;"); database.close();
+  database.exec("PRAGMA user_version = 7;"); database.close();
   try {
     assert.throws(() => new SqliteRepository(filename), /newer Pathways/);
     const check = new DatabaseSync(filename);
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 6);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 7);
     check.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -107,7 +107,7 @@ test("schema 1 migration adds flow storage without changing the existing workspa
     assert.equal(repository.listFlows().length, 0);
     assert.equal(repository.createFlow(exampleFlow())?.revision, 1);
     const check = new DatabaseSync(filename);
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 5); check.close();
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 6); check.close();
   } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -153,7 +153,7 @@ test("schema 2 definitions without projectId open as Unassigned without rewritin
     assert.equal(repository.listFlows(null)[0].projectId, null);
     const check = new DatabaseSync(filename);
     assert.equal(check.prepare("SELECT definition FROM application_flows").get()!.definition, JSON.stringify(legacy));
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 5); check.close();
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 6); check.close();
   } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 

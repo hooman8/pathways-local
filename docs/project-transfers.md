@@ -10,8 +10,8 @@ list, then choose **Import as new project**. Both instances must include this
 feature. The installations remain independent; imports do not synchronize them.
 
 The file includes the project roadmap, progress, decisions, assignments, associated
-engineers and teams, every application-flow definition, saved display order, and
-links between those flows, and per-flow presenter write-ups. It excludes sign-in accounts, roles, sessions,
+engineers and teams, every workflow and architecture definition, saved display order, and
+links between those flows, and per-diagram presenter write-ups, architecture groups, component kinds, and connection directions. It excludes sign-in accounts, roles, API keys, AI conversations/drafts, sessions,
 workspace templates, other projects, and server revision history. Use the separate
 workspace/template export or an operational database backup when those are needed.
 The older roadmap-only exports still work but do not include application flows.
@@ -56,3 +56,9 @@ orders are rejected. Keep exported business data outside source repositories.
 The common validators, ID mapping, and transfer UI are in `lib/project-bundle.ts`,
 `lib/project-transfer-request.ts`, and `components/flows/project-transfer.tsx` in
 both editions. Storage and authentication stay specific to each edition.
+
+## Compatibility contract
+
+Pathways Local 1.1.0 and the hosted Architecture release use the same portable validators and version-1 bundle format. Automated tests run hosted → local → hosted transfers against the hosted 1.1 contract, checking architecture metadata, workflow rules, internal links, saved order, presenter notes, and progress. Older roadmap/workflow files remain supported. Older local releases reject architecture fields and must be updated first.
+
+Use Export complete project for all diagrams plus the roadmap. Workspace/template exports cover roadmaps and templates but omit diagrams. Imports create independent copies with fresh IDs; they do not synchronize installations or transfer access rules.

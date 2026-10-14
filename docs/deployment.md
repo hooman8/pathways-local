@@ -6,7 +6,7 @@
 
 Start Docker Desktop, then run `docker compose up -d --build` from this repository.
 Open `http://localhost:8080`. The first build needs internet to download the base
-image and npm packages. Runtime needs only the local browser, container, and volume.
+image and npm packages. The core runtime needs only the local browser, container, and volume; optional Astra generation also needs internet access and your own key.
 The image runs as the non-root `node` user and owns `/data`.
 
 To update:
@@ -47,9 +47,9 @@ the original cloud application. It does not synchronize the two copies.
 Application flows have their own **Export** and **Import flow** actions. Workspace
 JSON exports omit them; a full database backup includes all flows and roadmaps.
 
-The complete-project update migrates SQLite schema 1 through 4 to schema 5 when the
+The complete-project update migrates SQLite schema 1 through 5 to schema 6 when the
 database is first opened. It preserves existing content and display order; older
-ungrouped flows appear in Unassigned until moved to a project. Older images reject schema 5, so keep a pre-update backup if you need to roll back the application version.
+ungrouped flows appear in Unassigned until moved to a project. Older images reject schema 6, so keep a pre-update backup if you need to roll back the application version.
 
 For an exact database backup, stop writes and copy the entire data directory:
 
@@ -83,7 +83,15 @@ On startup, a newer unsupported database schema is rejected. Restore the matchin
 application version or use a compatible backup; do not manually lower the SQLite
 schema version. A code rollback does not undo database edits.
 
-The application has no cloud resources to provision or billing settings to manage.
+The application has no cloud resources to provision. Optional Astra uses your own OpenAI API account and billing; no Pathways subscription is required.
 
 Use **Export complete project** for a portable project with both its roadmap and
 ordered application flows. See [project transfers](project-transfers.md).
+
+## Optional Astra configuration
+
+Prefer **AI settings** in the app. It saves the key as `/data/ai-credentials.json` with mode 0600, next to the SQLite database, and never returns it through settings responses. Project/workspace exports omit it. Full data-directory backups contain the key and conversations: keep those backups private. Removing the saved key does not remove project content.
+
+Alternatively copy `.env.example` to `.env`, set `OPENAI_API_KEY`, and recreate the container. Compose passes this server-only variable; it takes precedence over a UI-saved key. `OPENAI_MODEL=gpt-6-astra`, `OPENAI_REASONING_EFFORT=high`, and `OPENAI_MAX_OUTPUT_TOKENS=128000` are the supported defaults. `PATHWAYS_OPENAI_ENABLED=false` disables generation without deleting the key. Never prefix credential variables with `NEXT_PUBLIC_` or commit `.env`.
+
+Astra jobs have a 15-minute deadline and run within this one application process. A queued job resumes when its conversation is read; a job interrupted after being claimed expires and can be retried with a new message. Saved diagrams remain intact. Local agent authoring does not call OpenAI or require these settings.

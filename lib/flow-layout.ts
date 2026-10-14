@@ -1,13 +1,16 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import type { ElkNode } from "elkjs/lib/elk-api";
 import type { ApplicationFlow } from "./application-flow";
+import { layoutArchitecture, type ArchitectureGroup } from "./architecture-layout";
 
 export type FlowLayout = {
-  nodes: { id: string; x: number; y: number; inputX: number; outputX: number }[];
+  groups?: ArchitectureGroup[];
+  nodes: { id: string; x: number; y: number; inputX: number; outputX: number; groupId?: string }[];
   edges: { id: string; points: { x: number; y: number }[]; labelPosition?: { x: number; y: number } }[];
 };
 let elk: InstanceType<typeof ELK> | undefined;
-export async function layoutFlow(flow: Pick<ApplicationFlow, "nodes" | "edges">): Promise<FlowLayout> {
+export async function layoutFlow(flow: ApplicationFlow): Promise<FlowLayout> {
+  if (flow.diagramType === "architecture") return layoutArchitecture(flow);
   elk ??= new ELK();
   const graph: ElkNode = {
     id: "flow:root",
