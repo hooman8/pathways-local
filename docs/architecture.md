@@ -5,7 +5,7 @@
 Pathways Local is one Next.js application containing the browser interface and
 server API. One deployment serves one local workspace. SQLite is embedded in the
 Node process; there is no database service, authentication provider, cloud SDK,
-worker, or queue.
+external worker service, or managed queue. Optional Astra jobs run after the HTTP response inside the same process, with durable job/session records in SQLite. Local agents can submit reviewable proposals over localhost without a provider key.
 
 ```mermaid
 flowchart LR
@@ -87,3 +87,11 @@ saved task rules or progress.
 
 The vendored stylesheet and `build/sites-vite-plugin.LICENSE` are inherited notices.
 This application builds with Next.js and does not use a Sites hosting service.
+
+## Architecture and authoring
+
+`application-flow.ts`, `diagram-view.ts`, and `architecture-layout.ts` implement the shared workflow/architecture format and separate views. `local-ai-settings.ts` stores a user key in a separate mode-0600 file, while `server-ai.ts` runs the Responses tool loop after dispatch. `SqliteRepository` records sessions, claims each queued job once, and commits Apply plus diagram order and its receipt in one transaction. It never holds a database transaction while calling a provider.
+
+`/api/agent` publishes capabilities and a proposal schema. `/api/agent/project` reads a consistent full-project definition/base snapshot. `/api/agent/proposals` saves a validated draft without a provider call. The returned review link opens the same preview/Apply interface used by Astra. Every route retains the existing localhost Host/Origin checks.
+
+Secrets, conversations, generation jobs, and Apply receipts are not part of portable project exports. Workflows and architectures authored by either route are ordinary portable definitions once applied.

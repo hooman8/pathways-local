@@ -1,0 +1,1 @@
+These unmodified portable validators are a test-only reference from Pathways hosted release 1.1.0, commit 89f7ffb61a335d3bd030cc748b33c42567c29139 (MIT). They contain no server, account, credential, or runtime data. Tests run both editions against the same projects to catch format drift. Update this reference deliberately when the shared transfer contract changes.
