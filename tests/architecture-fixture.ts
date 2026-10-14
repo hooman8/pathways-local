@@ -26,3 +26,29 @@ export function architectureFixture() {
     ], presentationNotes: "The laptop authors task notes and attached documents. Two sync clients keep the paired folders aligned in both directions. The display station runs its local server and browser; reminder acknowledgements stay in its private state.",
   });
 }
+
+export function localAppArchitectureFixture() {
+  return validateFlow({ version: 1, id: "local-app", name: "Pathways Local architecture", diagramType: "architecture",
+    groups: [{ id: "client", title: "Your computer" }, { id: "app", title: "Docker application" }, { id: "cloud", title: "Optional OpenAI" }],
+    nodes: [
+      { id: "browser", kind: "frontend", title: "Browser workspace", groupId: "client" },
+      { id: "agent", kind: "process", title: "Local agent", groupId: "client" },
+      { id: "web", kind: "service", title: "Next.js server", groupId: "app" },
+      { id: "api", kind: "api", title: "Local APIs", groupId: "app" },
+      { id: "authoring", kind: "service", title: "Authoring runner", groupId: "app" },
+      { id: "db", kind: "database", title: "SQLite volume", groupId: "app" },
+      { id: "key", kind: "database", title: "Optional API key", groupId: "app" },
+      { id: "astra", kind: "external", title: "Astra API", groupId: "cloud" },
+    ], edges: [
+      { id: "ui", source: "browser", target: "web", label: "Local HTTP", direction: "both" },
+      { id: "routes", source: "web", target: "api", label: "Routes" },
+      { id: "agent-request", source: "agent", target: "api", label: "Agent API", direction: "both" },
+      { id: "storage", source: "api", target: "db", label: "Read / write", direction: "both" },
+      { id: "draft", source: "api", target: "authoring", label: "Authoring", direction: "both" },
+      { id: "jobs", source: "authoring", target: "db", label: "Drafts & jobs", direction: "both" },
+      { id: "secret", source: "key", target: "authoring", label: "Read key" },
+      { id: "generation", source: "authoring", target: "astra", label: "Optional generation", direction: "both" },
+      { id: "agent-review", source: "agent", target: "browser", label: "Open review link" },
+    ],
+  });
+}

@@ -8,19 +8,23 @@ export type ArchitectureGroup = { id: string; title: string; description: string
 
 export function layoutArchitecture(flow: ApplicationFlow) {
   let nextX = 24;
+  // Adjacent columns need enough room for a connection's complete label.
+  // Otherwise a valid graph can have no collision-free label position.
+  const columnGap = Math.max(COLUMN_GAP, ...flow.edges.map(edge => edge.label.length * 9 + 48));
+  const groupGap = Math.max(GROUP_GAP, columnGap);
   const groups: ArchitectureGroup[] = [];
   const nodes: { id: string; groupId: string; x: number; y: number; inputX: number; outputX: number }[] = [];
   for (const group of flow.groups ?? []) {
     const members = flow.nodes.filter(node => node.groupId === group.id), columns = members.length > 4 ? 2 : 1;
-    const width = PADDING * 2 + columns * COMPONENT_WIDTH + (columns - 1) * COLUMN_GAP;
+    const width = PADDING * 2 + columns * COMPONENT_WIDTH + (columns - 1) * columnGap;
     const rows = Math.ceil(members.length / columns);
     const height = HEADER + rows * COMPONENT_HEIGHT + Math.max(0, rows - 1) * ROW_GAP + PADDING;
     const box = { ...group, x: nextX, y: 24, width, height };
     groups.push(box);
     members.forEach((node, index) => nodes.push({ id: node.id, groupId: group.id,
-      x: box.x + PADDING + (index % columns) * (COMPONENT_WIDTH + COLUMN_GAP),
+      x: box.x + PADDING + (index % columns) * (COMPONENT_WIDTH + columnGap),
       y: box.y + HEADER + Math.floor(index / columns) * (COMPONENT_HEIGHT + ROW_GAP), inputX: 160, outputX: 160 }));
-    nextX += width + GROUP_GAP;
+    nextX += width + groupGap;
   }
   const byId = new Map(nodes.map(node => [node.id, node]));
   const obstacles = nodes.map(node => ({ ...node, width: COMPONENT_WIDTH, height: COMPONENT_HEIGHT }));
