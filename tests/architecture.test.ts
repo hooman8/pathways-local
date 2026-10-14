@@ -6,7 +6,7 @@ import { segmentCrossesCard } from "../lib/connector-routing";
 import { exportBundle, prepareBundleImport } from "../lib/project-bundle";
 import { migrateRoadmap } from "../lib/projects";
 import { exampleFlow } from "./flow-fixture";
-import { architectureFixture } from "./architecture-fixture";
+import { architectureFixture, localAppArchitectureFixture } from "./architecture-fixture";
 import { COMPONENT_WIDTH, COMPONENT_HEIGHT } from "../lib/architecture-layout";
 import { normalizeAiProposal } from "../lib/ai-authoring";
 import { diagramUrl, diagramsInView, projectOrderForView } from "../lib/diagram-view";
@@ -111,6 +111,35 @@ test("architecture connections sharing an API keep their labels distinct", async
   });
   for (const [index, label] of labels.entries()) {
     assert.ok(labels.slice(index + 1).every(other => Math.abs(label.x - other.x) >= (label.width + other.width) / 2 || Math.abs(label.y - other.y) >= (label.height + other.height) / 2));
+  }
+});
+
+test("dense architecture groups render labeled connections between columns and across systems", async () => {
+  for (const longLabels of [false, true]) {
+    const flow = localAppArchitectureFixture();
+    if (longLabels) {
+      flow.edges.find(edge => edge.id === "jobs")!.label = "Persist validated architecture proposals and revision history";
+      flow.edges.find(edge => edge.id === "generation")!.label = "Optional Astra generation with your own OpenAI API credentials";
+    }
+    assert.equal(inspectFlow(flow).valid, true);
+    const layout = await layoutFlow(flow);
+    assert.equal(layout.nodes.length, flow.nodes.length);
+    assert.equal(layout.edges.length, flow.edges.length);
+    const cards = layout.nodes.map(node => ({ ...node, width: COMPONENT_WIDTH, height: COMPONENT_HEIGHT }));
+    const labels = layout.edges.map(route => {
+      const definition = flow.edges.find(edge => edge.id === route.id)!;
+      const obstacles = cards.filter(card => card.id !== definition.source && card.id !== definition.target);
+      for (let i = 1; i < route.points.length; i++) {
+        assert.ok(obstacles.every(card => !segmentCrossesCard(route.points[i - 1], route.points[i], card)), `clear connector ${route.id}`);
+      }
+      assert.ok(route.labelPosition, `visible label ${route.id}`);
+      const label = { ...route.labelPosition, width: definition.label.length * 9 + 24, height: 36 };
+      assert.ok(cards.every(card => label.x + label.width / 2 <= card.x || label.x - label.width / 2 >= card.x + card.width || label.y + 18 <= card.y || label.y - 18 >= card.y + card.height), `clear label ${route.id}`);
+      return label;
+    });
+    for (const [index, label] of labels.entries()) {
+      assert.ok(labels.slice(index + 1).every(other => Math.abs(label.x - other.x) >= (label.width + other.width) / 2 || Math.abs(label.y - other.y) >= (label.height + other.height) / 2), "distinct labels");
+    }
   }
 });
 

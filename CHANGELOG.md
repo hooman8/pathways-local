@@ -1,5 +1,12 @@
 # Release notes
 
+## Unreleased
+
+- Architecture layouts leave enough space for connection labels between component
+  columns and system groups, preventing a blank canvas for valid dense diagrams.
+- Fit View and manual zoom can show the complete architecture when its system
+  groups are wider than the viewport, while initial views keep components readable.
+
 ## 1.1.0
 
 - Architecture view with grouped components, labeled relationships, true two-way

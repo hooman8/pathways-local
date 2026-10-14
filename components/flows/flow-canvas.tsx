@@ -113,7 +113,7 @@ function Canvas({ flow, phase, selected, onSelect, canExpand = true }: { flow: A
   });
   return <div ref={container} className={`application-flow-canvas${architecture ? " architecture-canvas" : ""}`} aria-label={architecture ? "Grouped architecture diagram" : "Application flow diagram"}>
     <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}
-      minZoom={architecture ? 0.65 : 0.08} maxZoom={1.8} onNodeClick={(_, node) => { if (node.type === "flowStep") onSelect(node.id); }} onPaneClick={() => onSelect(null)} colorMode="light">
+      minZoom={0.08} maxZoom={1.8} onNodeClick={(_, node) => { if (node.type === "flowStep") onSelect(node.id); }} onPaneClick={() => onSelect(null)} colorMode="light">
       <Background gap={24} size={1} color="#dbe1e6" /><Controls showInteractive={false} />{!architecture && <MiniMap pannable zoomable nodeColor="#d9e3e6" />}
     </ReactFlow>
     <div className="flow-canvas-help"><ArrowRight size={14} />{architecture ? "Select a component for details." : "Select a step for details."} Scroll to zoom; drag to pan.</div>
