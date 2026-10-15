@@ -10,6 +10,8 @@ import { localOwner } from "../lib/local-access";
 import { saveProjectTemplate, createProject } from "../lib/projects";
 import { transferFixture } from "./bundle-fixture";
 import { exampleFlow } from "./flow-fixture";
+import { architectureFixture } from "./architecture-fixture";
+import { prepareDiagramImport } from "../lib/diagram-import";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "pathways-sqlite-"));
@@ -92,6 +94,29 @@ test("flow definitions survive restart and reject duplicate IDs and stale revisi
     assert.equal(a.listFlows()[0].name, "Updated");
     assert.equal(a.listFlows()[0].nodes, flow.nodes.length);
   } finally { a.close(); b.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("import replacement preserves project, linked diagrams and order and refuses stale overwrites", async () => {
+  const { directory, filename } = fixture(), repository = new SqliteRepository(filename);
+  try {
+    const workspace = await new WorkspaceStore(repository, localOwner.email).get(localOwner);
+    const projectId = workspace.workspace!.activeProjectId;
+    const reviewed = repository.createFlow({ ...architectureFixture(), projectId })!;
+    const detail = exampleFlow(); detail.id = "linked-workflow"; detail.projectId = projectId;
+    detail.nodes[3].kind = "subflow"; detail.nodes[3].subflowId = reviewed.flow.id;
+    const linked = repository.createFlow(detail)!;
+    const order = repository.listFlows(projectId).map(flow => flow.id);
+    const replacement = prepareDiagramImport({ ...reviewed.flow, projectId: "foreign-installation", presentationNotes: "Updated import", description: "New architecture description" }, { mode: "replace", existing: reviewed });
+    assert.equal(repository.createFlow(replacement), null);
+    const saved = repository.updateFlow(replacement, reviewed.revision)!;
+    assert.equal(saved.revision, reviewed.revision + 1);
+    assert.deepEqual(saved.flow, replacement);
+    assert.equal(saved.flow.projectId, projectId);
+    assert.deepEqual(repository.readFlow(linked.flow.id), linked);
+    assert.deepEqual(repository.listFlows(projectId).map(flow => flow.id), order);
+    assert.equal(repository.updateFlow(reviewed.flow, reviewed.revision), null);
+    assert.deepEqual(repository.readFlow(reviewed.flow.id), saved);
+  } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("schema 1 migration adds flow storage without changing the existing workspace", async () => {
