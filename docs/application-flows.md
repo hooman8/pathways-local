@@ -14,7 +14,12 @@ to pan the diagram.
 
 **New flow**, **Import flow**, and **Edit definition** open a JSON editor.
 **Validate & preview** checks the model without saving. **Save flow** persists the
-preview. Drafts remain in browser memory; export them before closing the page.
+preview. When an imported diagram ID already exists, choose **Replace existing**
+to review and overwrite its definition, or **Import as copy** for a separate
+diagram in the selected project. Replacement keeps the saved diagram’s project,
+ID, detail links, and position. **Download existing** preserves a copy before
+saving. The final **Replace flow** / **Replace architecture** uses the reviewed
+saved revision; competing changes are rejected and the imported draft is kept. Drafts remain in browser memory; export them before closing the page.
 On a revision conflict, export your draft, discard it, select the saved flow again,
 then apply your changes to the latest definition. Flow exports contain one raw
 definition; use **Export complete project** to include all of its linked flows and their order. Roadmap workspace exports

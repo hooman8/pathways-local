@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from "@/components/ui/textarea";
 import { architectureStarter, diagramTypeOf, type ApplicationFlow, type DiagramType, type FlowSnapshot, type FlowSummary, type FlowProject } from "@/lib/application-flow";
 import { diagramsInView, diagramUrl, projectOrderForView } from "@/lib/diagram-view";
+import { prepareDiagramImport } from "@/lib/diagram-import";
 import ProjectTransfer from "./project-transfer";
 import FlowCanvas from "./flow-canvas";
 import PresentationNotes from "./presentation-notes";
@@ -51,12 +52,14 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
   const [selected, setSelected] = useState<string | null>(null), [phase, setPhase] = useState(""), [view, setView] = useState<"diagram" | "steps">("diagram");
   const [editor, setEditor] = useState(false), [source, setSource] = useState(""), [creating, setCreating] = useState(false), [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<ApplicationFlow | null>(null), [editorError, setEditorError] = useState(""), [warnings, setWarnings] = useState<string[]>([]);
+  const [pendingImport, setPendingImport] = useState<{ flow: ApplicationFlow; existing: FlowSnapshot } | null>(null);
+  const [replacement, setReplacement] = useState<FlowSnapshot | null>(null);
   const [showPresentation, setShowPresentation] = useState(false), [notesEditing, setNotesEditing] = useState(false), [notesTextSize, setNotesTextSize] = useState("18");
   const upload = useRef<HTMLInputElement>(null), loadSequence = useRef(0);
   const flow = draft ?? snapshot?.flow;
   const currentProject = projects.find(project => project.id === projectId);
   const visibleFlows = diagramsInView(flows, projectId || null, diagramType);
-  const locked = loading || busy || !!draft || editor || notesEditing;
+  const locked = loading || busy || !!draft || editor || notesEditing || !!pendingImport;
   const flowName = (item: FlowSummary) => currentProject && item.name.startsWith(`${currentProject.name} · `) ? item.name.slice(currentProject.name.length + 3) : item.name;
   const step = flow?.nodes.find(node => node.id === selected);
   const load = useCallback(async (id: string) => {
@@ -70,12 +73,12 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
         window.location.assign(diagramUrl(body.flow.projectId, diagramTypeOf(body.flow), id));
         return;
       }
-      setSnapshot(body); setDraft(null); setCreating(false); setSelected(null); setPhase(""); setWarnings([]);
+      setSnapshot(body); setDraft(null); setCreating(false); setReplacement(null); setPendingImport(null); setSelected(null); setPhase(""); setWarnings([]);
       setProjectId(body.flow.projectId ?? "");
       window.history.replaceState(null, "", diagramUrl(body.flow.projectId, diagramType, id));
     } catch (error) { if (sequence === loadSequence.current) setError(error instanceof Error ? error.message : "Could not load this flow."); }
     finally { if (sequence === loadSequence.current) setLoading(false); }
-  }, [diagramType]);
+  }, [diagramType, setPendingImport, setReplacement]);
   const refresh = useCallback(async () => {
     const [catalog, list] = await Promise.all([readJson("/api/projects"), readJson("/api/flows")]);
     setProjects(catalog.projects); setProjectRevision(catalog.revision); setPermissions(catalog.permissions); setFlows(list.flows);
@@ -143,11 +146,11 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
     } finally { setBusy(false); }
   }
   useEffect(() => {
-    const leaving = (event: BeforeUnloadEvent) => { if (draft || editor) { event.preventDefault(); event.returnValue = ""; } };
+    const leaving = (event: BeforeUnloadEvent) => { if (draft || editor || pendingImport) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", leaving); return () => window.removeEventListener("beforeunload", leaving);
-  }, [draft, editor]);
-  const openEditor = (value: ApplicationFlow, isNew: boolean) => { setSource(JSON.stringify(value, null, 2)); setCreating(isNew); setEditorError(""); setEditor(true); };
-  const closeEditor = () => { if (!busy) { setEditor(false); if (!draft) setCreating(false); } };
+  }, [draft, editor, pendingImport]);
+  const openEditor = (value: ApplicationFlow, isNew: boolean) => { setSource(JSON.stringify(value, null, 2)); setCreating(isNew); if (isNew) setReplacement(null); setEditorError(""); setEditor(true); };
+  const closeEditor = () => { if (!busy) { setEditor(false); if (!draft) { setCreating(false); setReplacement(null); } } };
   async function validateSource() {
     let value; try { value = JSON.parse(source); } catch { throw new Error("Enter valid JSON before previewing."); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Enter a diagram definition as a JSON object.");
@@ -155,7 +158,8 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
     const response = await fetch("/api/flows/validate", { method: "POST", headers: requestHeaders, body: JSON.stringify({ flow: value }), signal: AbortSignal.timeout(15000) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.issues?.map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join("\n") || body.error);
-    setWarnings(body.warnings); return body.flow as ApplicationFlow;
+    const validated = body.flow as ApplicationFlow;
+    setWarnings(body.warnings); return replacement ? prepareDiagramImport(validated, { mode: "replace", existing: replacement }) : validated;
   }
   async function preview() {
     setBusy(true); setEditorError("");
@@ -171,8 +175,17 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
         method: creating ? "POST" : "PUT", headers: requestHeaders,
         body: JSON.stringify({ flow: draft, ...(!creating ? { revision: snapshot!.revision } : {}) }), signal: AbortSignal.timeout(15000),
       });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error);
-      setSnapshot(body); setDraft(null); setCreating(false); await refresh();
+      const body = await response.json();
+      if (response.status === 409 && creating) {
+        // Another import can create this ID after the initial file review.
+        const catalog = await readJson("/api/flows");
+        if (catalog.flows.some((item: FlowSummary) => item.id === draft.id)) {
+          const existing = await readJson(`/api/flows/${encodeURIComponent(draft.id)}`);
+          setPendingImport({ flow: draft, existing }); return;
+        }
+      }
+      if (!response.ok) throw new Error(body.error);
+      setSnapshot(body); setDraft(null); setCreating(false); setReplacement(null); await refresh();
       setProjectId(body.flow.projectId ?? "");
       window.history.replaceState(null, "", flowUrl(body.flow.projectId ?? "", body.flow.id));
     } catch (error) { setError(error instanceof Error ? error.message : "Could not save. Your draft is kept."); }
@@ -187,8 +200,36 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
   async function importFile(file?: File) {
     if (!file) return;
     if (file.size > 2_000_000) { setError("Choose a flow JSON file smaller than 2 MB."); return; }
-    try { setSource(JSON.stringify({ ...JSON.parse(await file.text()), projectId: projectId || null }, null, 2)); setCreating(true); setEditorError(""); setEditor(true); }
-    catch { setError("Could not read this file. Choose a readable JSON file."); }
+    setBusy(true); setError("");
+    try {
+      let imported;
+      try { imported = JSON.parse(await file.text()); } catch { throw new Error("Could not read this file. Choose a readable JSON file."); }
+      if (!imported || typeof imported !== "object" || Array.isArray(imported)) throw new Error("Choose a diagram definition as a JSON object.");
+      if (imported.format === "pathways-project-bundle") throw new Error("Use Import complete project for this project bundle.");
+      if (diagramTypeOf(imported) !== diagramType) throw new Error(`Open the ${diagramTypeOf(imported) === "architecture" ? "Architecture" : "Application flows"} view to import this diagram type.`);
+      const catalog = await readJson("/api/flows");
+      const match = catalog.flows.find((item: FlowSummary) => item.id === imported.id);
+      if (match) {
+        const existing = await readJson(`/api/flows/${encodeURIComponent(match.id)}`);
+        setPendingImport({ flow: imported, existing });
+      } else openEditor(prepareDiagramImport(imported, { mode: "new", projectId: projectId || null }), true);
+    } catch (error) { setError(error instanceof Error ? error.message : "Could not import this diagram."); }
+    finally { setBusy(false); }
+  }
+  function chooseImport(mode: "replace" | "copy") {
+    if (!pendingImport) return;
+    const { flow: imported, existing } = pendingImport;
+    if (mode === "replace") {
+      const value = prepareDiagramImport(imported, { mode, existing });
+      setDraft(null); setSnapshot(existing); setReplacement(existing); setCreating(false);
+      setProjectId(existing.flow.projectId ?? "");
+      setSource(JSON.stringify(value, null, 2)); setEditorError(""); setEditor(true);
+      window.history.replaceState(null, "", flowUrl(existing.flow.projectId ?? "", existing.flow.id));
+    } else {
+      setDraft(null);
+      openEditor(prepareDiagramImport(imported, { mode, projectId: projectId || null, id: crypto.randomUUID() }), true);
+    }
+    setPendingImport(null); setError("");
   }
   return <div className="flow-workspace">
     <aside className="flow-library">
@@ -234,7 +275,7 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
       {error && <div className="flow-error" role="alert">{error}</div>}
       {loading ? <div className="flow-empty" role="status">Loading {itemsName}…</div> : !flow ? <div className="flow-empty">{architecture ? <Network size={34} /> : <GitBranch size={34} />}<h1>{architecture ? "Map your app architecture" : currentProject ? `${currentProject.name} workflows` : "Map how your application works"}</h1><p>{architecture ? "Describe your frontend, services, APIs, databases, and integrations with Build with AI, or start with a component diagram." : `Create or import a flow in ${currentProject?.name ?? "Unassigned"}.`}</p><Button disabled={!permissions.canEdit} onClick={() => openEditor(starter(), true)}>Create your first {itemName}</Button></div> : <>
         <div className="flow-heading"><div><div className="flow-eyebrow">{currentProject?.name ?? "Unassigned"} · {flow.diagramType === "architecture" ? "SYSTEM ARCHITECTURE" : "APPLICATION BEHAVIOR"}</div><h1>{flow.name}</h1><p>{flow.description}</p></div><div className="flow-actions"><Button variant="outline" disabled={locked || !permissions.canEdit} onClick={() => { setMoveTarget(projectId); setProjectError(""); setProjectDialog("move"); }}><FolderOpen size={15} />Move to project</Button><Button variant="outline" disabled={busy || notesEditing || !permissions.canEdit} onClick={() => openEditor(flow, !!draft && creating)}><Braces size={15} />Edit definition</Button><Button variant="outline" onClick={() => download(flow)}><Download size={15} />Export</Button></div></div>
-        {draft && <div className="flow-draft" role="status"><span><strong>Draft preview</strong> · Review before saving.</span><div><Button variant="ghost" disabled={busy} onClick={() => { setDraft(null); setCreating(false); setError(""); setWarnings([]); }}>Discard draft</Button><Button disabled={busy} onClick={() => void save()}><Check size={15} />{busy ? "Saving…" : architecture ? "Save architecture" : "Save flow"}</Button></div></div>}
+        {draft && <div className="flow-draft" role="status"><span><strong>{replacement ? "Replacement preview" : "Draft preview"}</strong> · {replacement ? `Replaces ${replacement.flow.name} in ${currentProject?.name ?? "Unassigned"}. Review before saving.` : "Review before saving."}</span><div>{replacement && <Button variant="ghost" onClick={() => download(replacement.flow)}><Download size={15} />Download existing</Button>}<Button variant="ghost" disabled={busy} onClick={() => { setDraft(null); setCreating(false); setReplacement(null); setError(""); setWarnings([]); }}>Discard draft</Button><Button disabled={busy} onClick={() => void save()}><Check size={15} />{busy ? "Saving…" : replacement ? architecture ? "Replace architecture" : "Replace flow" : architecture ? "Save architecture" : "Save flow"}</Button></div></div>}
         {!!warnings.length && <div className="flow-warning">{warnings.join(" ")}</div>}
         <div className="flow-toolbar"><div className="flow-view-tabs"><button aria-pressed={view === "diagram"} onClick={() => setView("diagram")}>Diagram</button><button aria-pressed={view === "steps"} onClick={() => setView("steps")}>{architecture ? "Components" : "Steps"}</button></div><label>{flow.diagramType === "architecture" ? "Group" : "Phase"} <select value={phase} onChange={event => { setPhase(event.target.value); setSelected(null); }}><option value="">{flow.diagramType === "architecture" ? "All groups" : "All phases"}</option>{flow.diagramType === "architecture" ? flow.groups?.map(group => <option key={group.id} value={group.id}>{group.title}</option>) : [...new Set(flow.nodes.map(node => node.phase).filter(Boolean))].map(phase => <option key={phase}>{phase}</option>)}</select></label><Button variant="outline" aria-pressed={showPresentation} onClick={() => setShowPresentation(value => !value)}><BookOpen size={15} />Presenter notes</Button><span>{flow.nodes.length} {flow.diagramType === "architecture" ? "components" : "steps"} · {flow.edges.length} connections{snapshot && !creating ? ` · Revision ${snapshot.revision}` : ""}</span></div>
         <div className={showPresentation ? "flow-presentation-layout" : undefined}>
@@ -256,6 +297,16 @@ export default function FlowWorkspace({ initialId, initialProjectId, initialDraf
         {projectError && <p className="flow-editor-error" role="alert">{projectError}</p>}
         <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setProjectDialog(null)}>Cancel</Button><Button type="submit" disabled={busy || (projectDialog === "create" ? !projectName.trim() : moveTarget === projectId)}>{busy ? "Saving…" : projectDialog === "create" ? "Create project" : "Move flow"}</Button></DialogFooter>
       </form></DialogContent></Dialog>
-    <Dialog open={editor} onOpenChange={open => { if (!open) closeEditor(); }}><DialogContent className="flow-json-dialog"><DialogHeader><DialogTitle>{creating ? architecture ? "Create architecture" : "Create application flow" : architecture ? "Edit architecture definition" : "Edit flow definition"}</DialogTitle><DialogDescription>{architecture ? "Define components, system groups, and labeled connections in JSON. Validation checks group membership and component references before preview." : "Define steps and labeled connections in JSON. Validation checks references, decisions, timers, and bounded retries before preview."}</DialogDescription></DialogHeader><Textarea aria-label={architecture ? "Architecture definition JSON" : "Flow definition JSON"} spellCheck={false} value={source} onChange={event => setSource(event.target.value)} />{editorError && <pre className="flow-editor-error" role="alert">{editorError}</pre>}<DialogFooter><Button variant="outline" disabled={busy} onClick={closeEditor}>Cancel</Button><Button disabled={busy} onClick={() => void preview()}>{busy ? "Validating…" : "Validate & preview"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={!!pendingImport} onOpenChange={open => { if (!open && !busy) setPendingImport(null); }}><DialogContent><DialogHeader>
+      <DialogTitle>Diagram already exists</DialogTitle>
+      <DialogDescription>A saved diagram has the same ID as this file. Replace its definition or import a separate copy.</DialogDescription>
+    </DialogHeader>{pendingImport && <>
+      <p><strong>{pendingImport.existing.flow.name}</strong> in {projects.find(project => project.id === pendingImport.existing.flow.projectId)?.name ?? "Unassigned"} · {pendingImport.existing.flow.nodes.length} {diagramTypeOf(pendingImport.existing.flow) === "architecture" ? "components" : "steps"} · {pendingImport.existing.flow.edges.length} connections</p>
+      <p>Replacing keeps the saved diagram’s project, links, and position. Review the imported definition before saving.</p>
+      {diagramTypeOf(pendingImport.existing.flow) !== diagramType && <p className="flow-editor-error">This ID belongs to a different diagram type. Import as a copy to keep both diagrams.</p>}
+      <Button variant="ghost" onClick={() => download(pendingImport.existing.flow)}><Download size={15} />Download existing</Button>
+      <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setPendingImport(null)}>Cancel</Button><Button variant="outline" disabled={busy} onClick={() => chooseImport("copy")}>Import as copy</Button><Button disabled={busy || diagramTypeOf(pendingImport.existing.flow) !== diagramType} onClick={() => chooseImport("replace")}>Replace existing</Button></DialogFooter>
+    </>}</DialogContent></Dialog>
+    <Dialog open={editor} onOpenChange={open => { if (!open) closeEditor(); }}><DialogContent className="flow-json-dialog"><DialogHeader><DialogTitle>{replacement ? architecture ? "Replace architecture definition" : "Replace flow definition" : creating ? architecture ? "Create architecture" : "Create application flow" : architecture ? "Edit architecture definition" : "Edit flow definition"}</DialogTitle><DialogDescription>{architecture ? "Define components, system groups, and labeled connections in JSON. Validation checks group membership and component references before preview." : "Define steps and labeled connections in JSON. Validation checks references, decisions, timers, and bounded retries before preview."}</DialogDescription></DialogHeader><Textarea aria-label={architecture ? "Architecture definition JSON" : "Flow definition JSON"} spellCheck={false} value={source} onChange={event => setSource(event.target.value)} />{editorError && <pre className="flow-editor-error" role="alert">{editorError}</pre>}<DialogFooter><Button variant="outline" disabled={busy} onClick={closeEditor}>Cancel</Button><Button disabled={busy} onClick={() => void preview()}>{busy ? "Validating…" : "Validate & preview"}</Button></DialogFooter></DialogContent></Dialog>
   </div>;
 }
