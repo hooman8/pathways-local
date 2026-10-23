@@ -94,7 +94,7 @@ Docker runs one application container; no separate database container is needed.
 
 ## Develop and contribute
 
-With Node.js 22.13+ installed:
+With Node.js 22.23.4 installed (see [runtime pins](docs/node-runtime.md)):
 
 ```sh
 npm ci

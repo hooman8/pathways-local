@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md)
 
-Use Node.js 22.13+ and npm. CI and Docker use Node 22. The built-in SQLite module
+Use Node.js 22.23.4 and npm, matching `.nvmrc`, CI, and Docker. See [runtime pins](node-runtime.md). The built-in SQLite module
 is available without an extra native database package; Node 22 may print its
 experimental-module warning. No Google project, emulators, or Java are required.
 
