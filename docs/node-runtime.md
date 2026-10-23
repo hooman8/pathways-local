@@ -25,3 +25,6 @@ Existing containers and Cloud Run revisions keep their original runtime until
 rebuilt and replaced. Follow [Deployment](deployment.md), preserve environment
 settings and data volumes/databases, and verify the active immutable image after
 rollout. CI does not deploy the hosted service.
+
+See the [October 23 validation and rollout record](node-security-2026-10-23.md)
+for measured artifacts, test results, and known limitations.
